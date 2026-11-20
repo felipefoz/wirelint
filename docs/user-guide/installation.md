@@ -6,17 +6,20 @@ LabVIEW are not required to run WireLint.
 
 ## Windows
 
-Download and run `wirelint-x86_64-pc-windows-msvc.msi`. The installer requires
+Download and run `wirelint-x86_64-pc-windows-msvc.msi`. It installs for the
+current user under `%LOCALAPPDATA%\Programs\wirelint`, does not require
 administrator access, offers an installation directory, and adds its `bin`
-directory to the system PATH by default. Open a new terminal afterwards:
+directory to that user's PATH. Open a new terminal afterwards:
 
 ```powershell
 wirelint --version
 wirelint --help
 ```
 
-Installing a newer MSI upgrades the existing installation. Remove WireLint
-through Windows Settings > Apps > Installed apps.
+Installing a newer MSI upgrades that user's existing installation. Because the
+MSI has changed from per-system to per-user, uninstall an older per-system
+installation first. Remove WireLint through Windows Settings > Apps > Installed
+apps. A per-system installation is not currently provided.
 
 The MSI is currently unsigned; Windows may display an unknown-publisher warning.
 Use only files downloaded from this repository's releases and verify their

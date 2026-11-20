@@ -74,7 +74,8 @@
             InstallerVersion='450'
             Languages='1033'
             Compressed='yes'
-            InstallScope='perMachine'
+            InstallScope='perUser'
+            InstallPrivileges='limited'
             SummaryCodepage='1252'
             />
 
@@ -86,41 +87,43 @@
         <Property Id='DiskPrompt' Value='wirelint Installation'/>
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
-            <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
-                <Directory Id='APPLICATIONFOLDER' Name='wirelint'>
-                    <!--
-                      Disabling the license sidecar file in the installer is a two step process:
+            <Directory Id='LocalAppDataFolder'>
+                <Directory Id='WireLintProgramsFolder' Name='Programs'>
+                    <Directory Id='APPLICATIONFOLDER' Name='wirelint'>
+                        <!--
+                          Disabling the license sidecar file in the installer is a two step process:
 
-                      1. Comment out or remove the `Component` tag along with its contents.
-                      2. Comment out or remove the `ComponentRef` tag with the "License" Id
-                         attribute value further down in this file.
-                    -->
-                    <Component Id='License' Guid='*'>
-                        <File Id='LicenseFile'
-                            DiskId='1'
-                            Source='LICENSE'
-                            KeyPath='yes'/>
-                    </Component>
-                    
-                    <Directory Id='Bin' Name='bin'>
-                        <Component Id='Path' Guid='F01D3E10-263B-4956-9C5E-B5DDCF9270E5' KeyPath='yes'>
-                            <Environment
-                                Id='PATH'
-                                Name='PATH'
-                                Value='[Bin]'
-                                Permanent='no'
-                                Part='last'
-                                Action='set'
-                                System='yes'/>
-                        </Component>
-                        <Component Id='binary0' Guid='*'>
-                            <File
-                                Id='exe0'
-                                Name='wirelint.exe'
+                          1. Comment out or remove the `Component` tag along with its contents.
+                          2. Comment out or remove the `ComponentRef` tag with the "License" Id
+                             attribute value further down in this file.
+                        -->
+                        <Component Id='License' Guid='*'>
+                            <File Id='LicenseFile'
                                 DiskId='1'
-                                Source='$(var.CargoTargetBinDir)\wirelint.exe'
+                                Source='LICENSE'
                                 KeyPath='yes'/>
                         </Component>
+
+                        <Directory Id='Bin' Name='bin'>
+                            <Component Id='Path' Guid='F01D3E10-263B-4956-9C5E-B5DDCF9270E5' KeyPath='yes'>
+                                <Environment
+                                    Id='PATH'
+                                    Name='PATH'
+                                    Value='[Bin]'
+                                    Permanent='no'
+                                    Part='last'
+                                    Action='set'
+                                    System='no'/>
+                            </Component>
+                            <Component Id='binary0' Guid='*'>
+                                <File
+                                    Id='exe0'
+                                    Name='wirelint.exe'
+                                    DiskId='1'
+                                    Source='$(var.CargoTargetBinDir)\wirelint.exe'
+                                    KeyPath='yes'/>
+                            </Component>
+                        </Directory>
                     </Directory>
                 </Directory>
             </Directory>
@@ -146,7 +149,7 @@
             <Feature
                 Id='Environment'
                 Title='PATH Environment Variable'
-                Description='Add the install location of the [ProductName] executable to the PATH system environment variable. This allows the [ProductName] executable to be called from any location.'
+                Description='Add the install location of the [ProductName] executable to the current user PATH environment variable. This allows the [ProductName] executable to be called from any location.'
                 Level='1'
                 Absent='allow'>
                 <ComponentRef Id='Path'/>
