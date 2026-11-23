@@ -34,9 +34,15 @@ pub trait Rule: Sync {
 
     /// Returns a finding message when the facts violate this rule.
     fn check(&self, facts: &FileFacts, options: Option<&RuleConfig>) -> Option<String>;
+
+    /// CWE identifiers this rule's findings map to; empty for non-security rules.
+    fn cwe(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
-/// All built-in rules; add new implementations here without changing the runner.
+/// All built-in quality/hygiene rules; add new implementations here without
+/// changing the runner. Security rules live in [`SECURITY_BUILT_INS`].
 pub static BUILT_INS: &[&dyn Rule] = &[
     &SeparateCompiledCode,
     &SavedVersion,
@@ -50,6 +56,9 @@ pub static BUILT_INS: &[&dyn Rule] = &[
     &TerminalStyle,
     &ConnectorPanePattern,
 ];
+
+/// All built-in security rules, run by `wirelint sast`; see decision 0026.
+pub static SECURITY_BUILT_INS: &[&dyn Rule] = &[];
 
 /// Default minimum release for saved LabVIEW files.
 pub const DEFAULT_MINIMUM_VERSION: Version = Version {
@@ -414,6 +423,18 @@ impl Rule for ConnectorPanePattern {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quality_rules_have_no_cwe_mapping_by_default() {
+        for rule in BUILT_INS {
+            assert!(rule.cwe().is_empty(), "{}", rule.id());
+        }
+    }
+
+    #[test]
+    fn security_registry_is_empty_until_the_first_security_rule_ships() {
+        assert!(SECURITY_BUILT_INS.is_empty());
+    }
 
     #[test]
     fn reports_disabled_separation_only() {

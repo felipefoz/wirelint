@@ -1115,14 +1115,14 @@ fn lists_rules_and_handles_an_empty_folder() {
         .unwrap();
     assert!(output.status.success());
     let rules = String::from_utf8(output.stdout).unwrap();
-    assert!(rules.contains("separate-compiled-code [warning]"));
-    assert!(rules.contains("saved-version [warning]"));
+    assert!(rules.contains("separate-compiled-code [scan, warning]"));
+    assert!(rules.contains("saved-version [scan, warning]"));
     assert!(!rules.contains("minimum-saved-version"));
-    assert!(rules.contains("file-description [warning]"));
-    assert!(rules.contains("debugging-status [warning]"));
-    assert!(rules.contains("no-breakpoints [error]"));
-    assert!(rules.contains("auto-error-handling [error]"));
-    assert!(rules.contains("password-set [warning]"));
+    assert!(rules.contains("file-description [scan, warning]"));
+    assert!(rules.contains("debugging-status [scan, warning]"));
+    assert!(rules.contains("no-breakpoints [scan, error]"));
+    assert!(rules.contains("auto-error-handling [scan, error]"));
+    assert!(rules.contains("password-set [scan, warning]"));
     let directory = TestDirectory::new();
     for args in [vec![], vec!["--verbose"]] {
         let output = directory.scan(&args);

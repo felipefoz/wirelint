@@ -2,7 +2,7 @@
 
 use crate::config::{Config, FailOn};
 use crate::formats;
-use crate::rules::{BUILT_INS, Severity};
+use crate::rules::{Rule, Severity};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -59,9 +59,10 @@ impl Report {
 /// Reads each file once and runs every enabled rule over the extracted facts.
 ///
 /// File errors are recorded and scanning continues. When all rules are disabled,
-/// discovered files are not read and the analyzed count is zero.
-pub fn analyze(root: &Path, files: &[PathBuf], config: &Config) -> Report {
-    let active: Vec<_> = BUILT_INS
+/// discovered files are not read and the analyzed count is zero. `rules` is
+/// the active registry (`BUILT_INS` for `scan`, `SECURITY_BUILT_INS` for `sast`).
+pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Rule]) -> Report {
+    let active: Vec<_> = rules
         .iter()
         .filter_map(|rule| {
             let options = config.rules.get(rule.id());

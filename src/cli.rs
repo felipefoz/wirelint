@@ -3,7 +3,7 @@
 use crate::analysis;
 use crate::config::{Config, FailOn};
 use crate::reports::{self, Format};
-use crate::rules::{BUILT_INS, Severity};
+use crate::rules::{BUILT_INS, Rule, SECURITY_BUILT_INS, Severity};
 use crate::scan;
 use clap::{Parser, Subcommand};
 use std::collections::BTreeMap;
@@ -50,6 +50,30 @@ enum Command {
         #[arg(long, value_name = "FILE", requires = "format")]
         output: Option<PathBuf>,
     },
+    /// Discover LabVIEW files and run enabled security analysis rules.
+    #[command(
+        long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). Tier 1 checks read facts already stored in the file; none of them trace data flow, so a finding means 'needs review', not 'confirmed exploitable'. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
+    )]
+    Sast {
+        /// Folder to scan.
+        #[arg(value_name = "FOLDER")]
+        folder: PathBuf,
+        /// Explicit YAML file for rules and exclude-folders; no automatic discovery.
+        #[arg(long, value_name = "FILE")]
+        config: Option<PathBuf>,
+        /// Failure threshold; overrides YAML (default: error). 'none' still fails on analysis errors.
+        #[arg(long, value_enum)]
+        fail_on: Option<FailOn>,
+        /// Print individual findings in addition to summary totals.
+        #[arg(short, long)]
+        verbose: bool,
+        /// CI report format; requires --output. Terminal output is unchanged.
+        #[arg(long, value_enum, requires = "output")]
+        format: Option<Format>,
+        /// Write the CI report to FILE (overwrite); requires --format. Parent must exist.
+        #[arg(long, value_name = "FILE", requires = "format")]
+        output: Option<PathBuf>,
+    },
     /// List built-in rule IDs, descriptions, and default severities.
     Rules,
 }
@@ -58,14 +82,22 @@ enum Command {
 pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Result<u8> {
     match cli.command {
         Command::Rules => {
-            for rule in BUILT_INS {
-                writeln!(
-                    output,
-                    "{} [{}]: {}",
-                    rule.id(),
-                    rule.default_severity(),
-                    rule.description()
-                )?;
+            for (registry, rules) in [("scan", BUILT_INS), ("sast", SECURITY_BUILT_INS)] {
+                for rule in rules {
+                    let cwe = rule.cwe();
+                    writeln!(
+                        output,
+                        "{} [{registry}, {}]{}: {}",
+                        rule.id(),
+                        rule.default_severity(),
+                        if cwe.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ({})", cwe.join(", "))
+                        },
+                        rule.description()
+                    )?;
+                }
             }
             Ok(0)
         }
@@ -76,70 +108,113 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             verbose,
             format,
             output: destination,
-        } => {
-            let config_path = config;
-            let config = config_path
-                .as_deref()
-                .map(Config::load)
-                .transpose()?
-                .unwrap_or_default();
-            let fail_on = fail_on.unwrap_or(config.fail_on);
-            let started = Instant::now();
-            let files = scan::discover_files(&folder, &config.exclude_folders)?;
-            if files.is_empty() {
-                writeln!(output, "No supported LabVIEW files found.")?;
-            } else {
-                writeln!(
-                    output,
-                    "Found {} supported LabVIEW file(s). Running enabled rules...",
-                    files.len()
-                )?;
-            }
-            output.flush()?;
-            let report = analysis::analyze(&folder, &files, &config);
-            let elapsed = started.elapsed();
-            if verbose {
-                for finding in &report.findings {
-                    writeln!(
-                        output,
-                        "{}: {} [{}]: {}",
-                        finding.path.display(),
-                        finding.severity,
-                        finding.rule,
-                        finding.message
-                    )?;
-                }
-            }
-            for skipped in &report.skipped {
-                writeln!(
-                    output,
-                    "{}: skipped [{}] (#wirelint directive)",
-                    skipped.path.display(),
-                    skipped.rule
-                )?;
-            }
-            for error in &report.errors {
-                writeln!(
-                    errors,
-                    "{}: analysis error: {}",
-                    error.path.display(),
-                    error.message
-                )?;
-            }
-            write_summary(&report, elapsed, output)?;
-            if let (Some(format), Some(destination)) = (format, destination) {
-                check_destination(&destination, &folder, &files, config_path.as_deref())?;
-                let bytes = reports::render(&report, format)?;
-                fs::write(&destination, bytes).map_err(|error| {
-                    io::Error::new(
-                        error.kind(),
-                        format!("cannot write report '{}': {error}", destination.display()),
-                    )
-                })?;
-            }
-            Ok(report.exit_status(fail_on))
+        } => run_rules(
+            folder,
+            config,
+            fail_on,
+            verbose,
+            format,
+            destination,
+            BUILT_INS,
+            output,
+            errors,
+        ),
+        Command::Sast {
+            folder,
+            config,
+            fail_on,
+            verbose,
+            format,
+            output: destination,
+        } => run_rules(
+            folder,
+            config,
+            fail_on,
+            verbose,
+            format,
+            destination,
+            SECURITY_BUILT_INS,
+            output,
+            errors,
+        ),
+    }
+}
+
+/// Discovers files, runs `rules`, prints the terminal summary, and optionally
+/// writes a CI report. Shared by `scan` (`BUILT_INS`) and `sast`
+/// (`SECURITY_BUILT_INS`); only the active registry differs between them.
+#[allow(clippy::too_many_arguments)]
+fn run_rules(
+    folder: PathBuf,
+    config_path: Option<PathBuf>,
+    fail_on: Option<FailOn>,
+    verbose: bool,
+    format: Option<Format>,
+    destination: Option<PathBuf>,
+    rules: &[&dyn Rule],
+    output: &mut impl Write,
+    errors: &mut impl Write,
+) -> io::Result<u8> {
+    let config = config_path
+        .as_deref()
+        .map(|path| Config::load_for(path, rules))
+        .transpose()?
+        .unwrap_or_default();
+    let fail_on = fail_on.unwrap_or(config.fail_on);
+    let started = Instant::now();
+    let files = scan::discover_files(&folder, &config.exclude_folders)?;
+    if files.is_empty() {
+        writeln!(output, "No supported LabVIEW files found.")?;
+    } else {
+        writeln!(
+            output,
+            "Found {} supported LabVIEW file(s). Running enabled rules...",
+            files.len()
+        )?;
+    }
+    output.flush()?;
+    let report = analysis::analyze(&folder, &files, &config, rules);
+    let elapsed = started.elapsed();
+    if verbose {
+        for finding in &report.findings {
+            writeln!(
+                output,
+                "{}: {} [{}]: {}",
+                finding.path.display(),
+                finding.severity,
+                finding.rule,
+                finding.message
+            )?;
         }
     }
+    for skipped in &report.skipped {
+        writeln!(
+            output,
+            "{}: skipped [{}] (#wirelint directive)",
+            skipped.path.display(),
+            skipped.rule
+        )?;
+    }
+    for error in &report.errors {
+        writeln!(
+            errors,
+            "{}: analysis error: {}",
+            error.path.display(),
+            error.message
+        )?;
+    }
+    write_summary(&report, elapsed, output)?;
+    if let (Some(format), Some(destination)) = (format, destination) {
+        check_destination(&destination, &folder, &files, config_path.as_deref())?;
+        let bytes = reports::render(&report, format, rules)?;
+        fs::write(&destination, bytes).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("cannot write report '{}': {error}", destination.display()),
+            )
+        })?;
+    }
+    Ok(report.exit_status(fail_on))
 }
 
 /// Rejects existing destinations that resolve to an input file or configuration.

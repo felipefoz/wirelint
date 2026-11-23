@@ -1,7 +1,9 @@
 //! Strict, explicit YAML configuration for built-in rules.
 
 use crate::formats::Version;
-use crate::rules::{BUILT_INS, Severity};
+#[cfg(test)]
+use crate::rules::BUILT_INS;
+use crate::rules::{Rule, Severity};
 use clap::ValueEnum;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -196,11 +198,12 @@ where
 }
 
 impl Config {
-    /// Loads only the explicitly supplied configuration; no ancestor discovery.
-    ///
-    /// Returns path-qualified I/O/schema errors for invalid options or rule IDs.
-    pub fn load(path: &Path) -> io::Result<Self> {
-        let result = fs::read_to_string(path).and_then(|text| Self::parse(&text));
+    /// Loads configuration validated against an explicit rule registry
+    /// (`BUILT_INS` for `scan`, `SECURITY_BUILT_INS` for `sast`); no ancestor
+    /// discovery. Returns path-qualified I/O/schema errors for invalid
+    /// options or rule IDs.
+    pub fn load_for(path: &Path, rules: &[&dyn Rule]) -> io::Result<Self> {
+        let result = fs::read_to_string(path).and_then(|text| Self::parse_for(&text, rules));
         result.map_err(|error| {
             io::Error::new(
                 error.kind(),
@@ -209,8 +212,15 @@ impl Config {
         })
     }
 
-    /// Deserializes and validates a complete YAML configuration.
+    /// Deserializes and validates a complete YAML configuration against `BUILT_INS`.
+    #[cfg(test)]
     fn parse(text: &str) -> io::Result<Self> {
+        Self::parse_for(text, BUILT_INS)
+    }
+
+    /// Deserializes and validates a complete YAML configuration against an
+    /// explicit rule registry.
+    fn parse_for(text: &str, rules: &[&dyn Rule]) -> io::Result<Self> {
         let config: Self = serde_yaml_ng::from_str(text)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         if config.version != 1 {
@@ -239,7 +249,7 @@ impl Config {
                     "rule 'minimum-saved-version' was renamed to 'saved-version'; rename the configuration key",
                 ));
             }
-            if !BUILT_INS.iter().any(|rule| rule.id() == id) {
+            if !rules.iter().any(|rule| rule.id() == id) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("unknown rule '{id}'"),
