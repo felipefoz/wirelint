@@ -84,8 +84,6 @@ pub struct FileFacts {
     /// fixed terminal layouts; absent for controls and XML containers.
     pub connector_pane_pattern: Option<u8>,
     /// String defaults decoded from a VI's DFDS data space, when requested.
-    // This parser output is consumed by the follow-up hardcoded-secret rule.
-    #[allow(dead_code)]
     pub default_string_values: Option<Vec<DefaultStringValue>>,
 }
 

@@ -353,6 +353,31 @@ mod tests {
     }
 
     #[test]
+    fn sast_example_configuration_covers_all_security_rules_with_their_defaults() {
+        let config = Config::parse_for(
+            include_str!("../docs/wirelint-sast.example.yaml"),
+            crate::rules::sast::BUILT_INS,
+        )
+        .unwrap();
+        assert_eq!(config.rules.len(), crate::rules::sast::BUILT_INS.len());
+        for rule in crate::rules::sast::BUILT_INS {
+            let options = config.rules.get(rule.id()).unwrap_or_else(|| {
+                panic!(
+                    "SAST configuration template is missing rule '{}'",
+                    rule.id()
+                )
+            });
+            assert!(options.enabled, "template disables rule '{}'", rule.id());
+            assert_eq!(
+                options.severity,
+                Some(rule.default_severity()),
+                "template severity differs from the default for '{}'",
+                rule.id()
+            );
+        }
+    }
+
+    #[test]
     fn loads_defaults_and_explicit_overrides() {
         let defaults = Config::parse("{}").unwrap();
         assert!(defaults.rules.is_empty());

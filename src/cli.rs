@@ -54,7 +54,7 @@ enum Command {
     },
     /// Discover LabVIEW files and run enabled security analysis rules.
     #[command(
-        long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). Tier 1 checks read facts already stored in the file; none of them trace data flow, so a finding means 'needs review', not 'confirmed exploitable'. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
+        long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). The hardcoded-secret-default rule checks VI string defaults for credential-like key/value assignments and does not report the stored value. Tier 1 checks read facts already stored in the file; none of them trace data flow, so a finding means 'needs review', not 'confirmed exploitable'. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
     )]
     Sast {
         /// Folder to scan.

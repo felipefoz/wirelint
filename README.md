@@ -22,7 +22,15 @@ WireLint is licensed under the MIT License. See [LICENSE](LICENSE).
 - [Install from GitHub Releases](docs/user-guide/installation.md)
 - [Getting started and CLI usage](docs/user-guide/cli.md)
 - [Rule configuration](docs/user-guide/configuration.md)
-- [Built-in rules](docs/user-guide/rules.md)
+- [Quality and hygiene rules](docs/user-guide/quality-rules.md)
+- [Security analysis rules](docs/user-guide/sast-rules.md)
 - [GitLab and GitHub code quality reports](docs/user-guide/ci-reports.md)
 - [Configuration template](docs/wirelint.example.yaml)
+- [SAST configuration template](docs/wirelint-sast.example.yaml)
 - [Project roadmap](docs/roadmap.md)
+
+## Security analysis
+
+Run `wirelint sast <folder>` to find credential-like assignments in VI string
+defaults. See the [security rules](docs/user-guide/sast-rules.md) and [SAST
+configuration template](docs/wirelint-sast.example.yaml).

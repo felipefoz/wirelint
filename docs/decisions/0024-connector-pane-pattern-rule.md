@@ -112,6 +112,6 @@ actually use the fact" behavior) — never a guessed or defaulted pattern.
 
 - [Rule architecture](0006-rule-runner-and-source-only-check.md)
 - [Format research and attribution](../../THIRD_PARTY_NOTICES.md)
-- [User rule guide](../user-guide/rules.md)
+- [Quality and hygiene rule guide](../user-guide/quality-rules.md)
 - [Terminal style rule](0022-terminal-style-rule.md) (precedent for bounded,
   zlib-coded block parsing and for VI-family-only applicability)

@@ -39,5 +39,5 @@ format reader.
 ## References
 
 - [Rule architecture](0006-rule-runner-and-source-only-check.md)
-- [User rule guide](../user-guide/rules.md)
+- [Quality and hygiene rule guide](../user-guide/quality-rules.md)
 - [Mutation-history removal hook](https://gitlab.com/felipe_public/lv-dev-hooks/-/blob/main/src/lv-dev-hooks/remove-mutation-history.vi)

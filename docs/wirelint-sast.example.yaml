@@ -1,0 +1,19 @@
+# Copy this file and pass your copy with --config.
+# Keep every built-in security rule listed here with its default options.
+version: 1
+
+# Fail for error findings. Use warning to also fail for warning findings,
+# or none to report findings without failing. Analysis errors always fail.
+fail-on: error
+
+# Skip folders with these exact names at any depth.
+exclude-folders:
+  - .git
+  - .lv-venv
+
+rules:
+  # Flag credential-like key/value assignments in VI string defaults.
+  # The finding does not include the stored value.
+  hardcoded-secret-default:
+    enabled: true
+    severity: warning

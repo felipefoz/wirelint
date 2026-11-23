@@ -1125,6 +1125,23 @@ fn sast_rejects_quality_rule_configuration() {
     assert!(sast.stdout.is_empty());
     let error = String::from_utf8(sast.stderr).unwrap();
     assert!(error.contains("separate-compiled-code"), "{error}");
+
+    let config = directory.write(
+        "sast.yaml",
+        include_str!("../docs/wirelint-sast.example.yaml"),
+    );
+    let sast = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&directory.0)
+        .arg("--config")
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert!(
+        sast.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sast.stderr)
+    );
 }
 
 #[test]
@@ -1143,6 +1160,7 @@ fn lists_rules_and_handles_an_empty_folder() {
     assert!(rules.contains("no-breakpoints [scan, error]"));
     assert!(rules.contains("auto-error-handling [scan, error]"));
     assert!(rules.contains("password-set [scan, warning]"));
+    assert!(rules.contains("hardcoded-secret-default [sast, warning] (CWE-798, CWE-259)"));
     let directory = TestDirectory::new();
     for args in [vec![], vec!["--verbose"]] {
         let output = directory.scan(&args);

@@ -15,17 +15,24 @@ relative to the current working directory, not the scanned folder.
 ## Configuration template
 
 Copy [`wirelint.example.yaml`](../wirelint.example.yaml) as a starting point,
-or use it directly from the repository root:
+or use it directly for `scan` from the repository root:
 
 ```text
 wirelint scan path/to/project --config docs/wirelint.example.yaml
 ```
 
-The template lists every built-in rule with its default options. Add new rules
-there as they are implemented; a Rust test checks that the template remains
-complete and matches the defaults. Adjust `enabled` and `severity` in your copy
-to select the checks and levels for your project.
-It also excludes folders named `.git` and `.lv-venv` at any depth.
+`sast` has a separate registry and template,
+[`wirelint-sast.example.yaml`](../wirelint-sast.example.yaml):
+
+```text
+wirelint sast path/to/project --config docs/wirelint-sast.example.yaml
+```
+
+Each template lists every rule in its command's registry with its default
+options. Rust tests check that both templates remain complete and match the
+defaults. Adjust `enabled` and `severity` in your copy to select the checks and
+levels for your project. Both templates exclude folders named `.git` and
+`.lv-venv` at any depth.
 
 ## Schema
 
@@ -63,7 +70,7 @@ rules:
 | `rules.saved-version.minimum-version` | Quoted `major.minor` string | `'20.0'` if neither bound is set; otherwise no implicit minimum |
 | `rules.saved-version.maximum-version` | Quoted `major.minor` string | No maximum |
 | `rules.debugging-status.fail-when` | `enabled`, `disabled` | `enabled` |
-| `rules.connector-pane-pattern.allowed-patterns` | Nonempty list of pattern names (see [rules](rules.md#connector-pane-pattern)) | Required; no default, rule is inert until set |
+| `rules.connector-pane-pattern.allowed-patterns` | Nonempty list of pattern names (see [quality rules](quality-rules.md#connector-pane-pattern)) | Required; no default, rule is inert until set |
 | `rules.no-breakpoints` | Common `enabled` and `severity` options only | Enabled, `error` |
 
 Fields may be omitted. An omitted rule remains enabled; `rules: {}` does not
@@ -164,6 +171,8 @@ wirelint scan path/to/project --config checks.yaml --fail-on warning
 If all rules are disabled, discovery still runs, but file contents are not read
 and the analyzed count is zero. No content validation is claimed in this mode.
 
-See the [rule reference](rules.md) for each rule's defaults and interpretation,
-and the [CLI guide](cli.md) for output and exit statuses. General path/glob
-exclusions and machine report formats are not implemented in this version.
+See the [quality and hygiene rule reference](quality-rules.md) and the
+[security rule reference](sast-rules.md) for each rule's defaults and
+interpretation, and the [CLI guide](cli.md) for output and exit statuses.
+General path/glob exclusions and machine report formats are not implemented
+in this version.

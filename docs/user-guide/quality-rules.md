@@ -1,4 +1,4 @@
-# Analysis rules
+# Quality and hygiene rules
 
 WireLint calls its static-analysis tests **rules**, to distinguish them from
 the Rust tests that verify WireLint itself. List the built-in rules with:
@@ -7,9 +7,12 @@ the Rust tests that verify WireLint itself. List the built-in rules with:
 wirelint rules
 ```
 
-All built-ins are enabled by default. Each has a stable ID, default severity,
-and shared `enabled` and `severity` configuration options. See
+These quality and source-control hygiene rules run with `wirelint scan`. All
+are enabled by default and have a stable ID, default severity, and shared
+`enabled` and `severity` configuration options. See
 [configuration](configuration.md) for YAML examples and exit thresholds.
+For security analysis rules, see the separate
+[SAST rule reference](sast-rules.md).
 
 ## Rules
 
@@ -529,8 +532,8 @@ describes the extension contract:
    and a check that returns a message for violations.
 3. Register the implementation in `BUILT_INS`. The runner handles enablement,
    severity overrides, finding paths, and failure thresholds.
-4. Add focused Rust tests and document the rule here, including defaults,
-   applicable types, options, limitations, and remediation.
+4. Add focused Rust tests and document the quality rule here, including
+   defaults, applicable types, options, limitations, and remediation.
 
 Rule-specific options must be typed and validated; do not accept arbitrary
 options or silently ignore unknown keys.

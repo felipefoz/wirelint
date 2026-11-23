@@ -39,18 +39,24 @@ traversal. The [configuration template](../wirelint.example.yaml) excludes
 wirelint rules
 wirelint scan path/to/project --config checks.yaml
 wirelint scan path/to/project --fail-on warning
+wirelint sast path/to/project --config sast-checks.yaml
 ```
 
-All built-in rules are enabled by default, with their default severities. The
-rules check compiled-code separation, saved LabVIEW version bounds
-(default minimum `20.0`, no maximum), file descriptions, VI debugging status,
-and saved block diagram breakpoints. The `no-breakpoints` rule defaults to
+All rules in the selected command are enabled by default, with their default
+severities. `scan` rules check compiled-code separation, saved LabVIEW version
+bounds (default minimum `20.0`, no maximum), file descriptions, VI debugging
+status, and saved block diagram breakpoints. The `no-breakpoints` rule defaults to
 `error` severity, so findings fail the default threshold. Other built-in rules
 default to `warning`, which does not fail the default `error` threshold.
 The `debugging-status` rule flags debugging-enabled VIs by default.
 Set its YAML option `fail-when: disabled` to flag the opposite state.
 The `saved-version` rule accepts inclusive `minimum-version` and
 `maximum-version` YAML options. Setting only a maximum applies no minimum.
+`sast` uses a separate rule registry and configuration; its initial
+`hardcoded-secret-default` rule flags credential-like assignments in VI string
+defaults. SAST findings indicate content that needs review, not confirmed
+exploitable vulnerabilities. See the
+[security rule reference](sast-rules.md#hardcoded-secret-default).
 
 Without `--config`, WireLint uses built-in defaults; no YAML file is required.
 All rules are enabled, the failure threshold is `error`, and no folders are
@@ -58,8 +64,9 @@ excluded. `--config <FILE>` loads an explicit YAML file; there is no automatic
 discovery.
 
 `--fail-on <error|warning|none>` overrides the built-in or YAML failure
-threshold, so it also works without `--config`. See
-[configuration](configuration.md) and the [rule reference](rules.md).
+threshold, so it also works without `--config`. See the
+[configuration guide](configuration.md), [quality rules](quality-rules.md),
+and [security analysis rules](sast-rules.md).
 
 ## Full scan command example
 
@@ -107,7 +114,7 @@ Results are reported after analysis finishes; the initial message is not a
 per-file progress indicator.
 
 Skipped enabled rules are always printed on stdout with their file paths when
-suppressed by a [VI bookmark or XML description directive](rules.md#skipping-a-rule-with-a-bookmark).
+suppressed by a [VI bookmark or XML description directive](quality-rules.md#skipping-a-rule-with-a-bookmark).
 They do not appear in CI reports or count as findings.
 
 The final summary counts successfully analyzed files, findings, and analysis

@@ -85,4 +85,4 @@ behavior; this rule introduces no new format-support gap.
 
 - [Rule architecture](0006-rule-runner-and-source-only-check.md)
 - [Format research and attribution](../../THIRD_PARTY_NOTICES.md)
-- [User rule guide](../user-guide/rules.md)
+- [Quality and hygiene rule guide](../user-guide/quality-rules.md)
