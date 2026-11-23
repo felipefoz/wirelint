@@ -60,7 +60,7 @@ impl Report {
 ///
 /// File errors are recorded and scanning continues. When all rules are disabled,
 /// discovered files are not read and the analyzed count is zero. `rules` is
-/// the active registry (`BUILT_INS` for `scan`, `SECURITY_BUILT_INS` for `sast`).
+/// the active registry for the selected command.
 pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Rule]) -> Report {
     let active: Vec<_> = rules
         .iter()

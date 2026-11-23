@@ -2,7 +2,7 @@
 
 use crate::formats::Version;
 #[cfg(test)]
-use crate::rules::BUILT_INS;
+use crate::rules::quality::BUILT_INS;
 use crate::rules::{Rule, Severity};
 use clap::ValueEnum;
 use serde::Deserialize;
@@ -199,9 +199,8 @@ where
 
 impl Config {
     /// Loads configuration validated against an explicit rule registry
-    /// (`BUILT_INS` for `scan`, `SECURITY_BUILT_INS` for `sast`); no ancestor
-    /// discovery. Returns path-qualified I/O/schema errors for invalid
-    /// options or rule IDs.
+    /// for the selected command; no ancestor discovery. Returns path-qualified
+    /// I/O/schema errors for invalid options or rule IDs.
     pub fn load_for(path: &Path, rules: &[&dyn Rule]) -> io::Result<Self> {
         let result = fs::read_to_string(path).and_then(|text| Self::parse_for(&text, rules));
         result.map_err(|error| {
@@ -301,7 +300,7 @@ impl Config {
                     ));
                 }
                 for name in allowed {
-                    if !crate::rules::CONNECTOR_PANE_PATTERNS
+                    if !crate::rules::quality::CONNECTOR_PANE_PATTERNS
                         .iter()
                         .any(|(known, _)| known == name)
                     {
@@ -340,7 +339,7 @@ mod tests {
         }
         assert_eq!(
             config.rules["saved-version"].minimum_version,
-            Some(crate::rules::DEFAULT_MINIMUM_VERSION)
+            Some(crate::rules::quality::DEFAULT_MINIMUM_VERSION)
         );
         assert_eq!(config.rules["saved-version"].maximum_version, None);
         assert_eq!(

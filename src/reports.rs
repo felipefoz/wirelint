@@ -22,9 +22,8 @@ pub enum Format {
 /// Paths remain relative to the scan root. Rejects non-UTF-8 paths rather than
 /// emitting ambiguous lossy names. Analysis errors are SARIF invocation failures,
 /// not rule findings; GitLab consumers must also check the process exit status.
-/// `rules` is the registry that produced `report` (`BUILT_INS` or
-/// `SECURITY_BUILT_INS`); SARIF lists its full rule metadata, including any
-/// CWE tags, independent of which rules actually produced findings.
+/// `rules` is the registry that produced `report`; SARIF lists its full rule
+/// metadata, including any CWE tags, independent of which rules produced findings.
 pub fn render(report: &Report, format: Format, rules: &[&dyn Rule]) -> io::Result<Vec<u8>> {
     let findings = report
         .findings
@@ -175,7 +174,7 @@ fn sarif_location(path: &str) -> Value {
 mod tests {
     use super::*;
     use crate::analysis::AnalysisError;
-    use crate::rules::BUILT_INS;
+    use crate::rules::quality::BUILT_INS;
     use std::path::PathBuf;
 
     fn sample() -> Report {

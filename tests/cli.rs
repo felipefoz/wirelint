@@ -1108,6 +1108,26 @@ fn invalid_or_missing_configuration_fails_before_scanning() {
 }
 
 #[test]
+fn sast_rejects_quality_rule_configuration() {
+    let directory = TestDirectory::new();
+    let config = directory.write("checks.yaml", "rules:\n  separate-compiled-code: {}\n");
+    let scan = directory.configured_scan(&config, &[]);
+    assert!(scan.status.success());
+
+    let sast = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&directory.0)
+        .arg("--config")
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert_eq!(sast.status.code(), Some(2));
+    assert!(sast.stdout.is_empty());
+    let error = String::from_utf8(sast.stderr).unwrap();
+    assert!(error.contains("separate-compiled-code"), "{error}");
+}
+
+#[test]
 fn lists_rules_and_handles_an_empty_folder() {
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
         .arg("rules")

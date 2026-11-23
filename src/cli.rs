@@ -3,7 +3,9 @@
 use crate::analysis;
 use crate::config::{Config, FailOn};
 use crate::reports::{self, Format};
-use crate::rules::{BUILT_INS, Rule, SECURITY_BUILT_INS, Severity};
+use crate::rules::quality::BUILT_INS as QUALITY_BUILT_INS;
+use crate::rules::sast::BUILT_INS as SAST_BUILT_INS;
+use crate::rules::{Rule, Severity};
 use crate::scan;
 use clap::{Parser, Subcommand};
 use std::collections::BTreeMap;
@@ -82,7 +84,7 @@ enum Command {
 pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Result<u8> {
     match cli.command {
         Command::Rules => {
-            for (registry, rules) in [("scan", BUILT_INS), ("sast", SECURITY_BUILT_INS)] {
+            for (registry, rules) in [("scan", QUALITY_BUILT_INS), ("sast", SAST_BUILT_INS)] {
                 for rule in rules {
                     let cwe = rule.cwe();
                     writeln!(
@@ -115,7 +117,7 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             verbose,
             format,
             destination,
-            BUILT_INS,
+            QUALITY_BUILT_INS,
             output,
             errors,
         ),
@@ -133,7 +135,7 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             verbose,
             format,
             destination,
-            SECURITY_BUILT_INS,
+            SAST_BUILT_INS,
             output,
             errors,
         ),
@@ -141,8 +143,8 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
 }
 
 /// Discovers files, runs `rules`, prints the terminal summary, and optionally
-/// writes a CI report. Shared by `scan` (`BUILT_INS`) and `sast`
-/// (`SECURITY_BUILT_INS`); only the active registry differs between them.
+/// writes a CI report. Shared by `scan` and `sast`; only the active registry
+/// differs between them.
 #[allow(clippy::too_many_arguments)]
 fn run_rules(
     folder: PathBuf,
