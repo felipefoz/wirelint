@@ -37,6 +37,25 @@ decisions are omitted.
   the scan root, and reports are written to local files. See
   [decision 0011](decisions/0011-ci-code-quality-reports.md).
 
+## Security analysis
+
+- **Local dataflow/taint tracing (Tier 2a):** trace a value across wires
+  within one block diagram, for example OS command injection or path
+  traversal where the tainted string and the sink are in the same VI. Needs
+  a block-diagram wire/node graph model WireLint does not have yet, beyond
+  the bounded `BDHb` heap reads used today. See
+  [decision 0026](decisions/0026-security-analysis-command-and-rules.md).
+- **Interprocedural dataflow/taint tracing (Tier 2b):** trace a value across
+  subVI call boundaries using a project-wide call graph, for example SQL
+  injection or insecure deserialization where the tainted source and the sink
+  are in different VIs. Needs Tier 2a plus per-subVI input/output tainting.
+  See [decision 0026](decisions/0026-security-analysis-command-and-rules.md).
+- **GitLab Security Report Schema exact field layout:** decision 0026 commits
+  to a `sast`-artifact report format and a severity mapping, but defers the
+  precise JSON shape (schema version, `location`, `identifiers`) to a
+  follow-up decision once implemented, the way decision 0011 followed
+  decision 0004.
+
 ## Releases
 
 - **Commit-driven version bumps:** trigger releases from every push to `main`
