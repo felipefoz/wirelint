@@ -15,6 +15,7 @@ use std::io::{self, Read};
 /// Upper bound on the decompressed VCTP consolidated type pool; it holds
 /// every data type used by the VI, not only the connector pane's own type.
 const MAX_VCTP_SIZE: usize = 64 * 1024 * 1024;
+const MAX_VCTP_TYPE_COUNT: usize = 1_000_000;
 /// `TD_FULL_TYPE.Function`: the Type Descriptor kind describing a connector pane.
 const FUNCTION_TYPE: u8 = 0xF0;
 /// Number of fixed connector pane patterns LabVIEW currently offers.
@@ -78,7 +79,7 @@ fn read_conp(
 }
 
 /// Reads and decompresses the zlib-coded `VCTP` consolidated type pool.
-fn read_vctp(
+pub(super) fn read_vctp(
     table: &[u8],
     table_size: usize,
     data: &[u8],
@@ -120,10 +121,13 @@ fn read_vctp(
 /// Reads VCTP's flat Type Descriptor list (returning each entry's start
 /// offset) followed by its top-level index list, without interpreting any
 /// entry other than the one the caller later asks for by `FlatTypeID`.
-fn parse_vctp_lists(decoded: &[u8]) -> io::Result<(Vec<usize>, Vec<usize>)> {
+pub(super) fn parse_vctp_lists(decoded: &[u8]) -> io::Result<(Vec<usize>, Vec<usize>)> {
     let mut cursor = 0;
     let count = rsrc::number(decoded, cursor)?;
     cursor += 4;
+    if count > MAX_VCTP_TYPE_COUNT {
+        return Err(invalid("VCTP TypeDesc count exceeds the size limit"));
+    }
     let mut flat_offsets = Vec::new();
     for _ in 0..count {
         let entry_start = cursor;
@@ -137,6 +141,9 @@ fn parse_vctp_lists(decoded: &[u8]) -> io::Result<(Vec<usize>, Vec<usize>)> {
         }
     }
     let top_count = read_variable(decoded, &mut cursor)?;
+    if top_count > MAX_VCTP_TYPE_COUNT {
+        return Err(invalid("VCTP top-level type count exceeds the size limit"));
+    }
     let mut top_level = Vec::new();
     for _ in 0..top_count {
         top_level.push(read_variable(decoded, &mut cursor)?);
@@ -145,7 +152,7 @@ fn parse_vctp_lists(decoded: &[u8]) -> io::Result<(Vec<usize>, Vec<usize>)> {
 }
 
 /// Reads a Type Descriptor's `(type, flags, whole-entry length)` header.
-fn read_td_header(decoded: &[u8], cursor: &mut usize) -> io::Result<(u8, u8, usize)> {
+pub(super) fn read_td_header(decoded: &[u8], cursor: &mut usize) -> io::Result<(u8, u8, usize)> {
     let obj_len = read_variable(decoded, cursor)?;
     let rest = rsrc::slice(decoded, *cursor, 2)?;
     let obj_flags = rest[0];
@@ -175,7 +182,7 @@ fn read_function_pattern(decoded: &[u8], offset: usize) -> io::Result<u16> {
 
 /// Reads LabVIEW's 16-or-32-bit variable-size field: a 16-bit value, or a
 /// 32-bit value when its top bit is set, with that bit cleared from the result.
-fn read_variable(decoded: &[u8], cursor: &mut usize) -> io::Result<usize> {
+pub(super) fn read_variable(decoded: &[u8], cursor: &mut usize) -> io::Result<usize> {
     let high = rsrc::slice(decoded, *cursor, 2)?;
     let mut value = u16::from_be_bytes([high[0], high[1]]) as usize;
     *cursor += 2;

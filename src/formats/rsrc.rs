@@ -35,6 +35,7 @@ pub(super) fn read_facts_with_password(
         read_password,
         false,
         false,
+        false,
     )
     .map(|(facts, _)| facts)
 }
@@ -51,6 +52,7 @@ pub(super) fn read_facts_with_connector_pane_pattern(
         false,
         false,
         read_connector_pane_pattern,
+        false,
     )
     .map(|(facts, _)| facts)
 }
@@ -63,6 +65,7 @@ pub(super) fn read_facts_with_orphaned_vi(
     read_password: bool,
     read_orphaned_vi: bool,
     read_connector_pane_pattern: bool,
+    read_default_strings: bool,
 ) -> io::Result<(FileFacts, Vec<Vec<u8>>)> {
     let first_header = slice(bytes, 0, 32)?;
     let mut header_offset = 0;
@@ -117,6 +120,7 @@ pub(super) fn read_facts_with_orphaned_vi(
 
     let mut separate_compiled_code = None;
     let mut file_version = None;
+    let mut file_version_word = None;
     let mut saved_version = None;
     let mut debugging_enabled = None;
     let mut has_breakpoints = None;
@@ -134,6 +138,10 @@ pub(super) fn read_facts_with_orphaned_vi(
     let mut conp_section = None;
     let mut vctp_seen = false;
     let mut vctp_section = None;
+    let mut dfds_seen = false;
+    let mut dfds_section = None;
+    let mut tm80_seen = false;
+    let mut tm80_section = None;
     for block in table[4..table_size].as_chunks::<12>().0 {
         if &block[..4] == b"LVSR" {
             if separate_compiled_code.is_some() || number(block, 4)? != 0 {
@@ -165,10 +173,11 @@ pub(super) fn read_facts_with_orphaned_vi(
                 has_breakpoints = Some(instrument_state & 0x2000_0000 != 0);
                 auto_error_handling = Some(vi_flags2 & 0x2000_0000 != 0);
             }
-            if read_version || read_description {
+            if read_version || read_description || read_default_strings {
                 let word = u32::from_be_bytes(payload[0..4].try_into().unwrap());
                 let version = Version::from_word(word)?;
                 file_version = Some(version);
+                file_version_word = Some(word);
                 if read_version {
                     saved_version = Some(version);
                 }
@@ -226,12 +235,27 @@ pub(super) fn read_facts_with_orphaned_vi(
             }
             conp_seen = true;
             conp_section = Some((number(block, 4)?, number(block, 8)?));
-        } else if read_connector_pane_pattern && is_vi && &block[..4] == b"VCTP" {
+        } else if (read_connector_pane_pattern || read_default_strings)
+            && is_vi
+            && &block[..4] == b"VCTP"
+        {
             if vctp_seen {
                 return Err(invalid("duplicate VCTP consolidated type pool block"));
             }
             vctp_seen = true;
             vctp_section = Some((number(block, 4)?, number(block, 8)?));
+        } else if read_default_strings && is_vi && &block[..4] == b"TM80" {
+            if tm80_seen {
+                return Err(invalid("duplicate TM80 data-space type map"));
+            }
+            tm80_seen = true;
+            tm80_section = Some((number(block, 4)?, number(block, 8)?));
+        } else if read_default_strings && is_vi && &block[..4] == b"DFDS" {
+            if dfds_seen {
+                return Err(invalid("duplicate DFDS default-data block"));
+            }
+            dfds_seen = true;
+            dfds_section = Some((number(block, 4)?, number(block, 8)?));
         }
     }
     let separate_compiled_code =
@@ -261,6 +285,31 @@ pub(super) fn read_facts_with_orphaned_vi(
     } else {
         None
     };
+    let default_string_values = if read_default_strings && is_vi {
+        let version = file_version
+            .ok_or_else(|| invalid("missing LVSR version for DFDS default-data decoding"))?;
+        let dfds = dfds_section.ok_or_else(|| invalid("missing DFDS default-data block"))?;
+        let tm80 = tm80_section.ok_or_else(|| {
+            invalid("missing TM80 data-space type map (DSTM maps are unsupported)")
+        })?;
+        let vctp = vctp_section.ok_or_else(|| invalid("missing VCTP consolidated type pool"))?;
+        let version_word = file_version_word
+            .ok_or_else(|| invalid("missing LVSR version word for DFDS default-data decoding"))?;
+        Some(super::typed_data::read_default_strings(
+            table,
+            table_size,
+            data,
+            dfds,
+            tm80,
+            vctp,
+            super::typed_data::VersionInfo {
+                version,
+                word: version_word,
+            },
+        )?)
+    } else {
+        None
+    };
     Ok((
         FileFacts {
             separate_compiled_code,
@@ -276,6 +325,7 @@ pub(super) fn read_facts_with_orphaned_vi(
             has_mutation_history: None,
             terminal_icon_styles,
             connector_pane_pattern,
+            default_string_values,
         },
         bookmarks,
     ))
@@ -614,6 +664,84 @@ mod tests {
             put(&mut bytes, section + 4, u32::MAX);
         }
         put(&mut bytes, table + 92, 72);
+        bytes
+    }
+
+    fn fixture_with_default_strings() -> Vec<u8> {
+        let mut vi_payload = vec![0; 68];
+        vi_payload[..4].copy_from_slice(&0x1400_8000u32.to_be_bytes());
+        let vctp_payload = {
+            let mut payload = 1u32.to_be_bytes().to_vec();
+            payload.extend_from_slice(&[0, 4, 0, 0x30]);
+            payload.extend_from_slice(&[0, 1, 0, 0]);
+            payload
+        };
+        let tm80_payload = [0, 1, 0, 1, 0x20, 0].to_vec();
+        let mut dfds_payload = 5u32.to_be_bytes().to_vec();
+        dfds_payload.extend_from_slice(b"token");
+        let records = [
+            {
+                let mut record = (vi_payload.len() as u32).to_be_bytes().to_vec();
+                record.append(&mut vi_payload);
+                record
+            },
+            {
+                let coded = zlib_coded(&dfds_payload);
+                let mut record = (coded.len() as u32).to_be_bytes().to_vec();
+                record.extend_from_slice(&coded);
+                record
+            },
+            {
+                let coded = zlib_coded(&tm80_payload);
+                let mut record = (coded.len() as u32).to_be_bytes().to_vec();
+                record.extend_from_slice(&coded);
+                record
+            },
+            {
+                let coded = zlib_coded(&vctp_payload);
+                let mut record = (coded.len() as u32).to_be_bytes().to_vec();
+                record.extend_from_slice(&coded);
+                record
+            },
+        ];
+        let mut data = Vec::new();
+        let mut data_offsets = Vec::new();
+        for record in records {
+            data_offsets.push(data.len());
+            data.extend_from_slice(&record);
+        }
+
+        let table_header_size = 52;
+        let block_count = 4;
+        let table_size = 4 + 12 * block_count + 20 * block_count;
+        let info_size = table_header_size + table_size;
+        let info_offset = 32 + data.len();
+        let mut bytes = vec![0; info_offset + info_size];
+        for base in [0, info_offset] {
+            bytes[base..base + 16].copy_from_slice(b"RSRC\r\n\0\x03LVINLBVW");
+            put(&mut bytes, base + 16, info_offset as u32);
+            put(&mut bytes, base + 20, info_size as u32);
+            put(&mut bytes, base + 24, 32);
+            put(&mut bytes, base + 28, data.len() as u32);
+        }
+        bytes[32..32 + data.len()].copy_from_slice(&data);
+        put(&mut bytes, info_offset + 40, 32);
+        put(&mut bytes, info_offset + 44, table_header_size as u32);
+        put(&mut bytes, info_offset + 48, info_size as u32);
+        let table = info_offset + table_header_size;
+        put(&mut bytes, table, (block_count - 1) as u32);
+        let names = [b"LVSR", b"DFDS", b"TM80", b"VCTP"];
+        for index in 0..block_count {
+            let block = table + 4 + 12 * index;
+            bytes[block..block + 4].copy_from_slice(names[index]);
+            put(
+                &mut bytes,
+                block + 8,
+                (4 + 12 * block_count + 20 * index) as u32,
+            );
+            let section = table + 4 + 12 * block_count + 20 * index;
+            put(&mut bytes, section + 12, data_offsets[index] as u32);
+        }
         bytes
     }
 
@@ -978,6 +1106,7 @@ mod tests {
             false,
             true,
             false,
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -992,6 +1121,7 @@ mod tests {
                 false,
                 false,
                 true,
+                false,
                 false,
             )
             .unwrap()
@@ -1043,5 +1173,59 @@ mod tests {
         let table = info_offset + 52;
         bytes[table + 28..table + 32].copy_from_slice(b"CONP");
         assert!(read_facts_with_connector_pane_pattern(&bytes, true).is_err());
+    }
+
+    #[test]
+    fn reads_default_strings_only_when_requested() {
+        let bytes = fixture_with_default_strings();
+        assert!(
+            super::super::read_facts_with_orphaned_vi(
+                std::path::Path::new("ordinary.vi"),
+                &bytes,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            )
+            .is_ok()
+        );
+        let facts = super::super::read_facts_with_orphaned_vi(
+            std::path::Path::new("defaults.vi"),
+            &bytes,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+        )
+        .unwrap()
+        .0;
+        assert_eq!(
+            facts.default_string_values,
+            Some(vec![super::super::DefaultStringValue {
+                type_map_index: 1,
+                field_path: Vec::new(),
+                bytes: b"token".to_vec(),
+            }])
+        );
+        assert!(
+            super::super::read_facts_with_orphaned_vi(
+                std::path::Path::new("ordinary.vi"),
+                &fixture(0),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            )
+            .unwrap()
+            .0
+            .default_string_values
+            .is_none()
+        );
     }
 }

@@ -97,6 +97,9 @@ pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Ru
         rule.id() == "connector-pane-pattern"
             && options.is_some_and(|options| options.allowed_patterns.is_some())
     });
+    let read_default_strings = active
+        .iter()
+        .any(|(rule, _, _)| rule.id() == "hardcoded-secret-default");
     let mut analyzed_files = Vec::new();
     for path in files {
         let result = fs::read(root.join(path)).and_then(|bytes| {
@@ -108,6 +111,7 @@ pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Ru
                 read_password,
                 read_orphaned_vi,
                 read_connector_pane_pattern,
+                read_default_strings,
             )
         });
         match result {

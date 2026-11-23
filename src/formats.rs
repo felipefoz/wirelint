@@ -3,7 +3,10 @@
 mod connector;
 mod heap;
 mod rsrc;
+mod typed_data;
 mod xml;
+
+pub use typed_data::DefaultStringValue;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -80,6 +83,10 @@ pub struct FileFacts {
     /// Index (0-35) of the VI's connector pane pattern among LabVIEW's 36
     /// fixed terminal layouts; absent for controls and XML containers.
     pub connector_pane_pattern: Option<u8>,
+    /// String defaults decoded from a VI's DFDS data space, when requested.
+    // This parser output is consumed by the follow-up hardcoded-secret rule.
+    #[allow(dead_code)]
+    pub default_string_values: Option<Vec<DefaultStringValue>>,
 }
 
 /// Reads a VI-family RSRC file or an XML project/library/class document.
@@ -106,11 +113,13 @@ pub fn read_facts(
         read_password,
         false,
         false,
+        false,
     )
     .map(|(facts, _)| facts)
 }
 
 /// Reads facts and suppression directives, optionally extracting library links.
+#[allow(clippy::too_many_arguments)]
 pub fn read_facts_with_orphaned_vi(
     path: &Path,
     bytes: &[u8],
@@ -119,6 +128,7 @@ pub fn read_facts_with_orphaned_vi(
     read_password: bool,
     read_orphaned_vi: bool,
     read_connector_pane_pattern: bool,
+    read_default_strings: bool,
 ) -> io::Result<(FileFacts, Vec<Vec<u8>>)> {
     let xml = path.extension().and_then(|value| value.to_str());
     match xml {
@@ -142,6 +152,7 @@ pub fn read_facts_with_orphaned_vi(
             read_password,
             read_orphaned_vi,
             read_connector_pane_pattern,
+            read_default_strings,
         ),
     }
 }

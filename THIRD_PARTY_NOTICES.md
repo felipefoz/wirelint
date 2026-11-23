@@ -113,6 +113,13 @@ own code under the MIT License; refer to its
 [decision 0024](decisions/0024-connector-pane-pattern-rule.md) for the full
 reasoning, including how the raw `pattern` field maps to a pattern offset.
 
+The typed default-data reader uses pylabview's descriptions of `DFDS`,
+`TM80`, `VCTP`, Type Descriptor references and serialized DataFill values in
+`LVblock.py`, `LVdatatype.py`, and `LVdatafill.py`. These are used as format
+descriptions only; no implementation code or fixtures were copied. The
+supported subset and explicit unsupported layouts are recorded in
+[decision 0027](docs/decisions/0027-typed-default-data-reader.md).
+
 ## Rust dependencies
 
 WireLint uses Clap for the CLI, flate2 for zlib decompression, roxmltree for

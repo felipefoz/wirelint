@@ -152,6 +152,7 @@ pub(super) fn read_facts_with_members(
             has_mutation_history,
             terminal_icon_styles: None,
             connector_pane_pattern: None,
+            default_string_values: None,
         },
         directives,
     ))
