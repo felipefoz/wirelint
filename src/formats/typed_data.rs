@@ -15,6 +15,8 @@ const MAX_NESTING_DEPTH: usize = 128;
 const FLAG_DEFAULT_DATA: u32 = 1 << 13;
 const FLAG_ALIGN_PADDING: u32 = 1;
 const FLAG_SKIP_DATA: u32 = (1 << 3) | (1 << 10) | (1 << 11);
+const TD_FLAG_HAS_LABEL: u8 = 1 << 6;
+const MAX_LABEL_SEARCH: usize = 256;
 
 /// A raw string default and its location within the VI's type map.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,6 +25,10 @@ pub struct DefaultStringValue {
     pub type_map_index: usize,
     /// Cluster/array element indexes from the type-map entry to this value.
     pub field_path: Vec<usize>,
+    /// Type Descriptor labels from the type-map entry down to this value: one
+    /// entry for the top-level type, then one per `field_path` step. A level
+    /// without a stored label is empty. Bytes are not decoded.
+    pub labels: Vec<Vec<u8>>,
     /// Stored bytes, without text decoding or normalization.
     pub bytes: Vec<u8>,
 }
@@ -227,7 +233,7 @@ fn walk_default_data(
                     &mut cursor,
                     version.version,
                     type_map_index,
-                    &mut Vec::new(),
+                    &mut ValuePath::default(),
                     &mut output,
                     &mut budget,
                     version.word,
@@ -246,7 +252,7 @@ fn walk_default_data(
             &mut cursor,
             version.version,
             type_map_index,
-            &mut Vec::new(),
+            &mut ValuePath::default(),
             &mut output,
             &mut budget,
             version.word,
@@ -262,8 +268,8 @@ fn walk_default_data(
 #[allow(clippy::too_many_arguments)]
 /// Advances one typed value and records any nested string defaults.
 ///
-/// `cursor` is shared across the whole DFDS stream; `field_path` is pushed and
-/// popped around recursive cluster and array values.
+/// `cursor` is shared across the whole DFDS stream; `path` is pushed and
+/// popped around every Type Descriptor and recursive cluster/array value.
 fn walk_fill(
     types: &[u8],
     flat_offsets: &[usize],
@@ -273,7 +279,7 @@ fn walk_fill(
     cursor: &mut usize,
     version: Version,
     type_map_index: usize,
-    field_path: &mut Vec<usize>,
+    path: &mut ValuePath,
     output: &mut Vec<DefaultStringValue>,
     budget: &mut usize,
     version_word: u32,
@@ -287,8 +293,10 @@ fn walk_fill(
             "DFDS type nesting or element count exceeds the limit",
         ));
     }
-    let descriptor = descriptor(types, flat_offsets, flat_index)?;
-    match descriptor.kind {
+    let mut descriptor = descriptor(types, flat_offsets, flat_index)?;
+    path.labels.push(std::mem::take(&mut descriptor.label));
+    // Errors abort the whole walk, so the label only needs popping on success.
+    let result = match descriptor.kind {
         0x00 => Ok(()),
         0x01 | 0x05 | 0x15 => skip(data, cursor, 1),
         0x02 | 0x06 | 0x16 => skip(data, cursor, 2),
@@ -313,7 +321,8 @@ fn walk_fill(
             let bytes = take(data, cursor, length)?.to_vec();
             output.push(DefaultStringValue {
                 type_map_index,
-                field_path: field_path.clone(),
+                field_path: path.fields.clone(),
+                labels: path.labels.clone(),
                 bytes,
             });
             Ok(())
@@ -337,7 +346,7 @@ fn walk_fill(
                 }
             }
             for index in 0..element_count {
-                field_path.push(index);
+                path.fields.push(index);
                 walk_fill(
                     types,
                     flat_offsets,
@@ -347,13 +356,13 @@ fn walk_fill(
                     cursor,
                     version,
                     type_map_index,
-                    field_path,
+                    path,
                     output,
                     budget,
                     version_word,
                     depth + 1,
                 )?;
-                field_path.pop();
+                path.fields.pop();
             }
             Ok(())
         }
@@ -361,7 +370,7 @@ fn walk_fill(
             let children =
                 special_cluster_children(&descriptor.clients, type_map_flags, version_word)?;
             for (index, child) in children {
-                field_path.push(index);
+                path.fields.push(index);
                 walk_fill(
                     types,
                     flat_offsets,
@@ -371,13 +380,13 @@ fn walk_fill(
                     cursor,
                     version,
                     type_map_index,
-                    field_path,
+                    path,
                     output,
                     budget,
                     version_word,
                     depth + 1,
                 )?;
-                field_path.pop();
+                path.fields.pop();
             }
             Ok(())
         }
@@ -386,7 +395,16 @@ fn walk_fill(
         kind => Err(invalid(format!(
             "unsupported TypeDesc kind 0x{kind:02x} in DFDS"
         ))),
-    }
+    };
+    path.labels.pop();
+    result
+}
+
+/// Field indexes and Type Descriptor labels of the value currently walked.
+#[derive(Default)]
+struct ValuePath {
+    fields: Vec<usize>,
+    labels: Vec<Vec<u8>>,
 }
 
 /// Selects serialized children for known special type-map cluster flags.
@@ -433,6 +451,7 @@ struct TypeDescriptor {
     kind: u8,
     dimensions: Option<usize>,
     clients: Vec<usize>,
+    label: Vec<u8>,
 }
 
 /// Returns one flat Type Descriptor's type code after validating its range.
@@ -440,13 +459,14 @@ fn descriptor_kind(types: &[u8], offsets: &[usize], index: usize) -> io::Result<
     Ok(descriptor(types, offsets, index)?.kind)
 }
 
-/// Reads the structural fields needed to walk a cluster or array.
+/// Reads the structural fields needed to walk a cluster or array, plus the
+/// descriptor's label when its `HasLabel` flag is set.
 fn descriptor(types: &[u8], offsets: &[usize], index: usize) -> io::Result<TypeDescriptor> {
     let offset = *offsets
         .get(index)
         .ok_or_else(|| invalid("TypeDesc flat index is out of range"))?;
     let mut cursor = offset;
-    let (kind, _flags, length) = connector::read_td_header(types, &mut cursor)?;
+    let (kind, flags, length) = connector::read_td_header(types, &mut cursor)?;
     let end = offset
         .checked_add(length)
         .ok_or_else(|| invalid("TypeDesc range overflow"))?;
@@ -455,6 +475,7 @@ fn descriptor(types: &[u8], offsets: &[usize], index: usize) -> io::Result<TypeD
         kind,
         dimensions: None,
         clients: Vec::new(),
+        label: Vec::new(),
     };
     match kind {
         0x40 | 0xa0 => {
@@ -483,6 +504,7 @@ fn descriptor(types: &[u8], offsets: &[usize], index: usize) -> io::Result<TypeD
                     .push(connector::read_variable(types, &mut cursor)?);
             }
         }
+        0x30 | 0x37 if end.saturating_sub(cursor) >= 4 => cursor += 4,
         _ => {}
     }
     if cursor > end {
@@ -495,7 +517,31 @@ fn descriptor(types: &[u8], offsets: &[usize], index: usize) -> io::Result<TypeD
     {
         return Err(invalid("TypeDesc client index is out of range"));
     }
+    if flags & TD_FLAG_HAS_LABEL != 0 {
+        descriptor.label = trailing_label(&types[cursor..end]).to_vec();
+    }
     Ok(descriptor)
+}
+
+/// Locates the Pascal-string label LabVIEW stores at the end of a Type
+/// Descriptor whose `HasLabel` flag is set.
+///
+/// Type-specific properties are not fully decoded, so this follows pylabview's
+/// approach: within the last 256 bytes after the decoded properties, the first
+/// length byte whose text runs exactly to the descriptor's end, with only
+/// printable bytes or tab/CR/LF, is the label. No match yields an empty label.
+fn trailing_label(rest: &[u8]) -> &[u8] {
+    (rest.len().saturating_sub(MAX_LABEL_SEARCH)..rest.len())
+        .find_map(|start| {
+            let text = &rest[start + 1..];
+            (usize::from(rest[start]) == text.len()
+                && !text.is_empty()
+                && text
+                    .iter()
+                    .all(|byte| *byte >= 0x20 || matches!(byte, b'\t' | b'\r' | b'\n')))
+            .then_some(text)
+        })
+        .unwrap_or_default()
 }
 
 /// Resolves a one-based type-map index through VCTP's top-level list.
@@ -632,6 +678,7 @@ mod tests {
             vec![DefaultStringValue {
                 type_map_index: 3,
                 field_path: Vec::new(),
+                labels: vec![Vec::new()],
                 bytes: b"key".to_vec()
             }]
         );
@@ -668,25 +715,83 @@ mod tests {
                 DefaultStringValue {
                     type_map_index: 1,
                     field_path: vec![0],
+                    labels: vec![Vec::new(), Vec::new()],
                     bytes: b"a".to_vec(),
                 },
                 DefaultStringValue {
                     type_map_index: 1,
                     field_path: vec![1],
+                    labels: vec![Vec::new(), Vec::new()],
                     bytes: b"bc".to_vec(),
                 },
                 DefaultStringValue {
                     type_map_index: 2,
                     field_path: vec![0],
+                    labels: vec![Vec::new(), Vec::new()],
                     bytes: b"x".to_vec(),
                 },
                 DefaultStringValue {
                     type_map_index: 2,
                     field_path: vec![1],
+                    labels: vec![Vec::new(), Vec::new()],
                     bytes: b"yz".to_vec(),
                 },
             ]
         );
+    }
+
+    #[test]
+    fn attaches_type_descriptor_labels_along_the_value_path() {
+        fn labeled(kind: u8, body: &[u8], label: &[u8]) -> Vec<u8> {
+            let mut contents = body.to_vec();
+            contents.push(label.len() as u8);
+            contents.extend_from_slice(label);
+            let mut bytes = type_desc(kind, &contents);
+            bytes[2] = TD_FLAG_HAS_LABEL;
+            bytes
+        }
+
+        let pool = type_pool(
+            &[
+                labeled(0x30, &[0xff; 4], b"DB Password"),
+                type_desc(0x30, &[0xff; 4]),
+                labeled(0x50, &[0, 2, 0, 0, 0, 1], b"Settings"),
+            ],
+            &[2],
+        );
+        let mut data = Vec::new();
+        for value in [b"secret".as_slice(), b"plain".as_slice()] {
+            data.extend_from_slice(&(value.len() as u32).to_be_bytes());
+            data.extend_from_slice(value);
+        }
+        let values = defaults(
+            &pool,
+            &type_map(1, &[FLAG_DEFAULT_DATA]),
+            &data,
+            Version {
+                major: 20,
+                minor: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            values
+                .iter()
+                .map(|value| value.labels.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                vec![b"Settings".to_vec(), b"DB Password".to_vec()],
+                vec![b"Settings".to_vec(), Vec::new()],
+            ]
+        );
+    }
+
+    #[test]
+    fn finds_trailing_labels_like_pylabview() {
+        assert_eq!(trailing_label(b"\xff\xff\xff\xff\x04Name"), b"Name");
+        assert_eq!(trailing_label(b"\x02a\x01"), b"");
+        assert_eq!(trailing_label(b"\x03ab"), b"");
+        assert_eq!(trailing_label(b""), b"");
     }
 
     #[test]
@@ -818,6 +923,7 @@ mod tests {
             vec![DefaultStringValue {
                 type_map_index: 1,
                 field_path: Vec::new(),
+                labels: vec![Vec::new()],
                 bytes: b"ok".to_vec(),
             }]
         );

@@ -16,8 +16,7 @@ All SAST rules are enabled by default and use the shared `enabled` and
 
 ## `hardcoded-secret-default`
 
-Reports VI string defaults containing a non-placeholder value assigned to a
-credential-like key.
+Reports VI string defaults that appear to contain a stored credential.
 
 | Setting | Value |
 | --- | --- |
@@ -27,18 +26,49 @@ credential-like key.
 | Applies to | VI-family resources (`.vi`, `.vit`, `.vim`) |
 | Rule-specific options | None |
 
-The rule matches explicit assignments using keys such as `password`, `secret`,
-`token`, `api_key`, `access_key`, and `private_key`, with `=` or `:` as the
-assignment separator. Common template values, environment-variable references,
-and empty values are ignored. Unlabeled strings are not classified as secrets;
-the finding is a review signal, not confirmation of exploitability. Its
-message never includes the stored value. Remove the credential or load it from
-an appropriate secret store at runtime.
+Each string default is checked with these heuristics, strongest first:
 
-The format reader extracts serialized `DFDS` string defaults but does not map
-them to front-panel labels or inspect block-diagram string constants. The rule
-therefore cannot detect unlabeled credentials, diagram constants, or secrets
-stored in other data types.
+1. **Private keys and token formats.** PEM/PGP private-key headers, AWS
+   access key IDs (`AKIA`/`ASIA`), GitHub, GitLab, Slack, Google API, and
+   Stripe live keys, and signed JSON Web Tokens. These match anywhere in the
+   text, without a key name.
+2. **Credential-named controls.** The default of a control or indicator
+   whose label names a credential, such as `Password`, `DB Password`,
+   `API Key`, `access_token`, `Client Secret`, or `Kennwort`. For cluster and
+   array members, the innermost labeled level decides.
+3. **Credential assignments in text.** A credential-named key followed by a
+   value: `password=...`, `pwd: ...`, `"api_key": "..."`, `token := ...`,
+   `secret => ...`, `<password>...</password>`, `scheme://user:pass@host`,
+   and `Authorization: Bearer ...`.
+
+Names are split into words at punctuation and camel-case boundaries. A name
+counts as a credential when a word ends in a credential term (`password`,
+`passwd`, `pwd`, `passphrase`, `passcode`, `secret`, `token`, `credential`,
+`apikey`, ...) or when `key` follows a qualifier such as `api`, `access`,
+`private`, `secret`, or `encryption`. Names that describe credential
+metadata are ignored, for example `Password Hint`, `Password Length`,
+`Token URL`, `Token Type`, or `Secret Name`. A bare `Key` or `Pass` is not a
+credential name.
+
+For heuristics 2 and 3, values are ignored when, after trimming, they are
+shorter than four characters, consist of one repeated character (`****`),
+are common placeholders (`changeme`, `example`, `none`, `true`, ...),
+reference a variable or template (`$NAME`, `${NAME}`, `$(NAME)`, `%NAME%`,
+`{{name}}`, `<name>`, `[name]`, `your_...`), or read like user instructions
+(`Enter password here`).
+
+The finding names where the first match was found, using the control's labels
+(for example `"Settings" > "DB Password"`) or its type-map position when no
+label is stored, together with the heuristic that matched. It counts any other
+matching defaults in the file. The message never includes a stored value.
+Findings are review signals, not confirmation of exploitability. Remove the
+credential or load it from an appropriate secret store at runtime.
+
+The rule reads serialized `DFDS` string defaults and the control labels stored
+with their type descriptors. It does not inspect block-diagram string
+constants, the front panel's "Password Display" setting, or secrets stored in
+other data types. Secrets without a recognized name or format are not
+reported.
 
 Rule suppression directives are shared across commands. Their syntax and
 limitations are documented in the

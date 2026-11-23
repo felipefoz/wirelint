@@ -12,7 +12,8 @@ exclude-folders:
   - .lv-venv
 
 rules:
-  # Flag credential-like key/value assignments in VI string defaults.
+  # Flag credentials stored in VI string defaults: credential-named controls,
+  # key/value assignments, URL credentials, private keys, and token formats.
   # The finding does not include the stored value.
   hardcoded-secret-default:
     enabled: true

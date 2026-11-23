@@ -31,6 +31,7 @@ WireLint is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## Security analysis
 
-Run `wirelint sast <folder>` to find credential-like assignments in VI string
-defaults. See the [security rules](docs/user-guide/sast-rules.md) and [SAST
-configuration template](docs/wirelint-sast.example.yaml).
+Run `wirelint sast <folder>` to find credentials stored in VI string defaults,
+such as default values of password controls or embedded tokens. See the
+[security rules](docs/user-guide/sast-rules.md) and [SAST configuration
+template](docs/wirelint-sast.example.yaml).

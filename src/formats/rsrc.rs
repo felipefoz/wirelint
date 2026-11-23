@@ -672,7 +672,8 @@ mod tests {
         vi_payload[..4].copy_from_slice(&0x1400_8000u32.to_be_bytes());
         let vctp_payload = {
             let mut payload = 1u32.to_be_bytes().to_vec();
-            payload.extend_from_slice(&[0, 4, 0, 0x30]);
+            payload.extend_from_slice(&[0, 17, 0x40, 0x30, 0xff, 0xff, 0xff, 0xff, 8]);
+            payload.extend_from_slice(b"Password");
             payload.extend_from_slice(&[0, 1, 0, 0]);
             payload
         };
@@ -1208,6 +1209,7 @@ mod tests {
             Some(vec![super::super::DefaultStringValue {
                 type_map_index: 1,
                 field_path: Vec::new(),
+                labels: vec![b"Password".to_vec()],
                 bytes: b"token".to_vec(),
             }])
         );

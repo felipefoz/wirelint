@@ -42,7 +42,8 @@ the wrong control when another type precedes it.
   types need separate format research. An explicit error is safer than an
   incorrect stream position.
 - **Associate values with front-panel labels in this change:** deferred to a
-  separate parser increment for the FP DCO table.
+  separate parser increment. Decision 0029's amendment later attached Type
+  Descriptor labels from `VCTP` to each value.
 - **Use LabVIEW VI Scripting:** rejected by decisions 0001 and 0002; parsing
   must remain file-based, cross-platform, and independent of a LabVIEW
   installation.
