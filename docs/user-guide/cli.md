@@ -86,7 +86,8 @@ for report behavior and format details.
 ## Output and exit statuses
 
 The terminal report starts with the number of discovered files and a message
-that enabled rules are running. It does not list every discovered path.
+that enabled rules are running, followed by the scan type: `scan (quality)`
+or `sast (security)`. It does not list every discovered path.
 By default, findings are summarized by severity and rule, without individual
 file paths or messages. Rule totals are sorted by rule ID; rules with no
 findings are omitted. If there are no findings, both breakdowns are omitted.
@@ -95,6 +96,7 @@ For example:
 
 ```text
 Found 120 supported LabVIEW file(s). Running enabled rules...
+Scan type: scan (quality)
 Analyzed 120 file(s); 35 finding(s); 0 analysis error(s).
 Elapsed scan time: 0.123 s.
 Findings by severity: 0 info; 35 warning; 0 error.

@@ -30,7 +30,7 @@ pub struct Cli {
 enum Command {
     /// Discover LabVIEW files and run enabled analysis rules.
     #[command(
-        long_about = "Recursively analyze .vi, .vit, .vim, .ctl, .lvproj, .lvclass, and .lvlib files (case-insensitive). Skip .llb archives and symbolic links below the root. A '#wirelint RULE-ID' directive in a VI block-diagram free label or on a standalone line in an XML file's own description skips that enabled rule for that file and is reported on stdout. Directive lines alone do not satisfy file-description. All built-in rules are enabled by default, including saved-version with a minimum saved LabVIEW version of 20.0 and no maximum. The class-mutation-history rule warns when an .lvclass contains mutation-history content in its NI.LVClass.Geneology XML property. Configure inclusive minimum-version and/or maximum-version bounds in YAML; a maximum-only configuration has no minimum. The debugging-status rule flags VIs with debugging enabled by default; set fail-when: disabled in YAML to reverse the check. The no-breakpoints rule reports VIs saved with block diagram breakpoints as errors by default. Show summary totals and elapsed scan time by default; use --verbose for individual findings, without listing every discovered path. Elapsed time covers discovery and analysis, excluding configuration loading and final report rendering. Analysis errors always include file details. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error. Unsupported binary formats are errors, never passing checks."
+        long_about = "Recursively analyze .vi, .vit, .vim, .ctl, .lvproj, .lvclass, and .lvlib files (case-insensitive). Skip .llb archives and symbolic links below the root. A '#wirelint RULE-ID' directive in a VI block-diagram free label or on a standalone line in an XML file's own description skips that enabled rule for that file and is reported on stdout. Directive lines alone do not satisfy file-description. All built-in rules are enabled by default, including saved-version with a minimum saved LabVIEW version of 20.0 and no maximum. The class-mutation-history rule warns when an .lvclass contains mutation-history content in its NI.LVClass.Geneology XML property. Configure inclusive minimum-version and/or maximum-version bounds in YAML; a maximum-only configuration has no minimum. The debugging-status rule flags VIs with debugging enabled by default; set fail-when: disabled in YAML to reverse the check. The no-breakpoints rule reports VIs saved with block diagram breakpoints as errors by default. Print the scan type on stdout. Show summary totals and elapsed scan time by default; use --verbose for individual findings, without listing every discovered path. Elapsed time covers discovery and analysis, excluding configuration loading and final report rendering. Analysis errors always include file details. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error. Unsupported binary formats are errors, never passing checks."
     )]
     Scan {
         /// Folder to scan.
@@ -54,7 +54,7 @@ enum Command {
     },
     /// Discover LabVIEW files and run enabled security analysis rules.
     #[command(
-        long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). The hardcoded-secret-default rule checks VI string defaults for credentials (credential-named controls, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. Tier 1 checks read facts already stored in the file; none of them trace data flow, so a finding means 'needs review', not 'confirmed exploitable'. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
+        long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults for credentials (credential-named controls, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. Tier 1 checks read facts already stored in the file; none of them trace data flow, so a finding means 'needs review', not 'confirmed exploitable'. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
     )]
     Sast {
         /// Folder to scan.
@@ -117,6 +117,7 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             verbose,
             format,
             destination,
+            "scan (quality)",
             QUALITY_BUILT_INS,
             output,
             errors,
@@ -135,6 +136,7 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             verbose,
             format,
             destination,
+            "sast (security)",
             SAST_BUILT_INS,
             output,
             errors,
@@ -143,8 +145,7 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
 }
 
 /// Discovers files, runs `rules`, prints the terminal summary, and optionally
-/// writes a CI report. Shared by `scan` and `sast`; only the active registry
-/// differs between them.
+/// writes a CI report, identifying the active command and rule registry.
 #[allow(clippy::too_many_arguments)]
 fn run_rules(
     folder: PathBuf,
@@ -153,6 +154,7 @@ fn run_rules(
     verbose: bool,
     format: Option<Format>,
     destination: Option<PathBuf>,
+    scan_type: &str,
     rules: &[&dyn Rule],
     output: &mut impl Write,
     errors: &mut impl Write,
@@ -174,6 +176,7 @@ fn run_rules(
             files.len()
         )?;
     }
+    writeln!(output, "Scan type: {scan_type}")?;
     output.flush()?;
     let report = analysis::analyze(&folder, &files, &config, rules);
     let elapsed = started.elapsed();
@@ -358,6 +361,7 @@ mod tests {
             "default: error",
             "symbolic links",
             "without listing every discovered path",
+            "Print the scan type on stdout",
             "exclude-folders",
             "--verbose",
             "summary totals and elapsed scan time by default",
@@ -383,6 +387,12 @@ mod tests {
         ] {
             assert!(help.contains(expected), "{expected}: {help}");
         }
+        let help = command
+            .find_subcommand_mut("sast")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(help.contains("Print the scan type on stdout"), "{help}");
     }
 
     #[test]

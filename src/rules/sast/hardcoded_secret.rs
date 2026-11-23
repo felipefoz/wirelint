@@ -5,7 +5,7 @@
 //! credential-named controls, then credential assignments embedded in text.
 //! Every matcher is a bounded, ASCII case-insensitive byte heuristic that never
 //! retains the matched value. A file yields at most one finding, which names
-//! the first match's control labels (or type-map position) and kind and counts
+//! the first match's control labels (or type entry) and kind and counts
 //! the rest, but never repeats a stored value.
 
 use crate::config::RuleConfig;
@@ -100,8 +100,8 @@ fn nearest_label(value: &DefaultStringValue) -> Option<&[u8]> {
         .map(Vec::as_slice)
 }
 
-/// Describes where a value is stored using its labels, or its type-map
-/// position when no level is labeled.
+/// Describes where a value is stored using its labels, or its `VCTP` type
+/// entry when no level is labeled.
 fn location(value: &DefaultStringValue) -> String {
     let labels = value
         .labels
@@ -112,7 +112,7 @@ fn location(value: &DefaultStringValue) -> String {
     if !labels.is_empty() {
         return labels.join(" > ");
     }
-    let mut text = format!("type-map entry {}", value.type_map_index);
+    let mut text = format!("type entry {}", value.type_index);
     if !value.field_path.is_empty() {
         let fields = value
             .field_path
@@ -277,6 +277,14 @@ const PLACEHOLDERS: &[&[u8]] = &[
     b"off",
     b"hidden",
     b"masked",
+    b"password",
+    b"passwd",
+    b"pwd",
+    b"secret",
+    b"token",
+    b"apikey",
+    b"api_key",
+    b"credentials",
 ];
 
 /// Words (case-insensitive) that mark a value as instructions, not a secret.
@@ -424,7 +432,21 @@ fn is_credential_name(name: &[u8]) -> bool {
 /// Whether a trimmed value is long enough and not a placeholder or prompt.
 fn is_plausible_secret(value: &[u8]) -> bool {
     let value = value.trim_ascii();
-    value.len() >= MIN_SECRET_LENGTH && !is_placeholder(value) && !is_prompt(value)
+    value.len() >= MIN_SECRET_LENGTH
+        && !is_placeholder(value)
+        && !is_prompt(value)
+        && !is_prose(value)
+}
+
+/// Whether a value with spaces reads as a message, e.g. `The password is
+/// incorrect!`: it ends like a sentence or mentions a credential term.
+/// Space-separated passphrases without either remain plausible.
+fn is_prose(value: &[u8]) -> bool {
+    value.iter().any(u8::is_ascii_whitespace)
+        && (matches!(value.last(), Some(b'.' | b'!' | b'?'))
+            || name_words(value)
+                .iter()
+                .any(|word| CREDENTIAL_WORD_ENDINGS.contains(&word.as_slice())))
 }
 
 /// Excludes template values, masks, and environment-variable references.
@@ -694,7 +716,7 @@ mod tests {
 
     fn value(labels: &[&[u8]], bytes: &[u8]) -> DefaultStringValue {
         DefaultStringValue {
-            type_map_index: 3,
+            type_index: 3,
             field_path: vec![0; labels.len().saturating_sub(1)],
             labels: labels.iter().map(|label| label.to_vec()).collect(),
             bytes: bytes.to_vec(),
@@ -808,7 +830,7 @@ mod tests {
         let unlabeled_message = HardcodedSecretDefault
             .check(
                 &facts(vec![DefaultStringValue {
-                    type_map_index: 7,
+                    type_index: 7,
                     field_path: vec![1, 2],
                     labels: vec![Vec::new(); 3],
                     bytes: b"password=hunter22".to_vec(),
@@ -818,7 +840,7 @@ mod tests {
             .unwrap();
         assert!(
             unlabeled_message
-                .contains("in type-map entry 7, field 1.2 (credential assignment in text). ")
+                .contains("in type entry 7, field 1.2 (credential assignment in text). ")
         );
     }
 
@@ -949,6 +971,7 @@ mod tests {
     #[test]
     fn rejects_short_masked_placeholder_and_prompt_values() {
         assert!(is_plausible_secret(b"  hunter22  "));
+        assert!(is_plausible_secret(b"correct horse battery staple"));
         for text in [
             b"".as_slice(),
             b"   ",
@@ -956,10 +979,14 @@ mod tests {
             b"****",
             b"xxxxxxxx",
             b"changeme",
+            b"Password",
             b"your-api-key",
             b"{{secret}}",
             b"[token]",
             b"Enter password",
+            b"The password is incorrect!",
+            b"VI is protected. Try again later.",
+            b"needs a token from the server",
         ] {
             assert!(
                 !is_plausible_secret(text),

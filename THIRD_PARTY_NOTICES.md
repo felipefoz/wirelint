@@ -113,12 +113,19 @@ own code under the MIT License; refer to its
 [decision 0024](decisions/0024-connector-pane-pattern-rule.md) for the full
 reasoning, including how the raw `pattern` field maps to a pattern offset.
 
-The typed default-data reader uses pylabview's descriptions of `DFDS`,
-`TM80`, `VCTP`, Type Descriptor references and serialized DataFill values in
-`LVblock.py`, `LVdatatype.py`, and `LVdatafill.py`. These are used as format
+The typed default-data reader uses pylabview's descriptions of `VCTP`,
+`DTHP`, Type Descriptor references and labels, heap tags (`OF__DefaultData`,
+`OF__typeDesc`, `SL__fPDCO`), and serialized DataFill values in `LVblock.py`,
+`LVdatatype.py`, `LVheap.py`, and `LVdatafill.py`. labview-mcp's
+`experiments/pylabview/FINDINGS.md` (§3.16 to §3.19) independently reported
+that heap `DefaultData` holds terminal values. These are used as format
 descriptions only; no implementation code or fixtures were copied. The
-supported subset and explicit unsupported layouts are recorded in
-[decision 0027](docs/decisions/0027-typed-default-data-reader.md).
+`FPHb` source for front-panel defaults was confirmed with WireLint's own probe
+VIs. See [decision 0027](docs/decisions/0027-typed-default-data-reader.md) and
+[decision 0030](docs/decisions/0030-front-panel-defaults-from-source-heap.md).
+The front-panel name-label reader also uses pylabview's `OF__ddo`,
+`OF__partsList`, and `OF__partID` tags in `LVheap.py` and
+`PARTID.NAME_LABEL` in `LVparts.py` as format references.
 
 ## Rust dependencies
 

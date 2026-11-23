@@ -120,7 +120,6 @@ pub(super) fn read_facts_with_orphaned_vi(
 
     let mut separate_compiled_code = None;
     let mut file_version = None;
-    let mut file_version_word = None;
     let mut saved_version = None;
     let mut debugging_enabled = None;
     let mut has_breakpoints = None;
@@ -138,10 +137,10 @@ pub(super) fn read_facts_with_orphaned_vi(
     let mut conp_section = None;
     let mut vctp_seen = false;
     let mut vctp_section = None;
-    let mut dfds_seen = false;
-    let mut dfds_section = None;
-    let mut tm80_seen = false;
-    let mut tm80_section = None;
+    let mut fphb_seen = false;
+    let mut control_defaults = None;
+    let mut dthp_seen = false;
+    let mut dthp_section = None;
     for block in table[4..table_size].as_chunks::<12>().0 {
         if &block[..4] == b"LVSR" {
             if separate_compiled_code.is_some() || number(block, 4)? != 0 {
@@ -177,7 +176,6 @@ pub(super) fn read_facts_with_orphaned_vi(
                 let word = u32::from_be_bytes(payload[0..4].try_into().unwrap());
                 let version = Version::from_word(word)?;
                 file_version = Some(version);
-                file_version_word = Some(word);
                 if read_version {
                     saved_version = Some(version);
                 }
@@ -244,18 +242,28 @@ pub(super) fn read_facts_with_orphaned_vi(
             }
             vctp_seen = true;
             vctp_section = Some((number(block, 4)?, number(block, 8)?));
-        } else if read_default_strings && is_vi && &block[..4] == b"TM80" {
-            if tm80_seen {
-                return Err(invalid("duplicate TM80 data-space type map"));
+        } else if read_default_strings && is_vi && &block[..4] == b"FPHb" {
+            if fphb_seen {
+                return Err(invalid("duplicate FPHb front-panel heap"));
             }
-            tm80_seen = true;
-            tm80_section = Some((number(block, 4)?, number(block, 8)?));
-        } else if read_default_strings && is_vi && &block[..4] == b"DFDS" {
-            if dfds_seen {
-                return Err(invalid("duplicate DFDS default-data block"));
+            fphb_seen = true;
+            control_defaults = Some(super::heap::read_fphb(
+                table,
+                table_size,
+                data,
+                number(block, 4)?,
+                number(block, 8)?,
+            )?);
+        } else if read_default_strings && is_vi && matches!(&block[..4], b"FPHP" | b"FPHc") {
+            return Err(invalid(
+                "unsupported front-panel heap format for default-value extraction",
+            ));
+        } else if read_default_strings && is_vi && &block[..4] == b"DTHP" {
+            if dthp_seen {
+                return Err(invalid("duplicate DTHP heap type slice"));
             }
-            dfds_seen = true;
-            dfds_section = Some((number(block, 4)?, number(block, 8)?));
+            dthp_seen = true;
+            dthp_section = Some((number(block, 4)?, number(block, 8)?));
         }
     }
     let separate_compiled_code =
@@ -286,27 +294,26 @@ pub(super) fn read_facts_with_orphaned_vi(
         None
     };
     let default_string_values = if read_default_strings && is_vi {
-        let version = file_version
-            .ok_or_else(|| invalid("missing LVSR version for DFDS default-data decoding"))?;
-        let dfds = dfds_section.ok_or_else(|| invalid("missing DFDS default-data block"))?;
-        let tm80 = tm80_section.ok_or_else(|| {
-            invalid("missing TM80 data-space type map (DSTM maps are unsupported)")
-        })?;
-        let vctp = vctp_section.ok_or_else(|| invalid("missing VCTP consolidated type pool"))?;
-        let version_word = file_version_word
-            .ok_or_else(|| invalid("missing LVSR version word for DFDS default-data decoding"))?;
-        Some(super::typed_data::read_default_strings(
-            table,
-            table_size,
-            data,
-            dfds,
-            tm80,
-            vctp,
-            super::typed_data::VersionInfo {
-                version,
-                word: version_word,
-            },
-        )?)
+        let controls = control_defaults.ok_or_else(|| invalid("missing FPHb front-panel heap"))?;
+        if controls.is_empty() {
+            Some(Vec::new())
+        } else {
+            let version = file_version
+                .ok_or_else(|| invalid("missing LVSR version for default-value decoding"))?;
+            let dthp = super::typed_data::read_dthp(
+                table,
+                table_size,
+                data,
+                dthp_section.ok_or_else(|| invalid("missing DTHP heap type slice"))?,
+            )?;
+            let vctp =
+                vctp_section.ok_or_else(|| invalid("missing VCTP consolidated type pool"))?;
+            let types = super::connector::read_vctp(table, table_size, data, vctp)
+                .map_err(|error| invalid(format!("VCTP type pool: {error}")))?;
+            Some(super::typed_data::read_default_strings(
+                &types, dthp, &controls, version,
+            )?)
+        }
     } else {
         None
     };
@@ -668,18 +675,48 @@ mod tests {
     }
 
     fn fixture_with_default_strings() -> Vec<u8> {
+        fn node(heap: &mut Vec<u8>, tag: i32, scope: u8, class: Option<i16>, content: &[u8]) {
+            let tag = (tag + 31) as u16;
+            let size = if content.is_empty() { 0 } else { 6 };
+            heap.push(
+                (size << 5) | (u8::from(class.is_some()) << 4) | (scope << 2) | (tag >> 8) as u8,
+            );
+            heap.push(tag as u8);
+            if let Some(class) = class {
+                heap.extend_from_slice(&[1, 0xfe]);
+                heap.extend_from_slice(&class.to_be_bytes());
+            }
+            if !content.is_empty() {
+                heap.push(content.len() as u8);
+                heap.extend_from_slice(content);
+            }
+        }
         let mut vi_payload = vec![0; 68];
         vi_payload[..4].copy_from_slice(&0x1400_8000u32.to_be_bytes());
         let vctp_payload = {
             let mut payload = 1u32.to_be_bytes().to_vec();
-            payload.extend_from_slice(&[0, 17, 0x40, 0x30, 0xff, 0xff, 0xff, 0xff, 8]);
-            payload.extend_from_slice(b"Password");
+            payload.extend_from_slice(&[0, 8, 0, 0x30, 0xff, 0xff, 0xff, 0xff]);
             payload.extend_from_slice(&[0, 1, 0, 0]);
             payload
         };
-        let tm80_payload = [0, 1, 0, 1, 0x20, 0].to_vec();
-        let mut dfds_payload = 5u32.to_be_bytes().to_vec();
-        dfds_payload.extend_from_slice(b"token");
+        let mut heap = Vec::new();
+        node(&mut heap, -6, 0, Some(18), &[]);
+        node(&mut heap, 283, 1, None, &[1]);
+        node(&mut heap, 52, 0, Some(81), &[]);
+        node(&mut heap, 194, 0, None, &[]);
+        node(&mut heap, -6, 0, Some(10), &[]);
+        node(&mut heap, 192, 1, None, &[16]);
+        node(&mut heap, 270, 0, Some(1), &[]);
+        node(&mut heap, 3, 1, None, b"Password");
+        node(&mut heap, 270, 2, None, &[]);
+        node(&mut heap, -6, 2, None, &[]);
+        node(&mut heap, 194, 2, None, &[]);
+        node(&mut heap, 52, 2, None, &[]);
+        node(&mut heap, 571, 1, None, b"\0\0\0\x08hunter22");
+        node(&mut heap, -6, 2, None, &[]);
+        let mut fphb_payload = (heap.len() as u32).to_be_bytes().to_vec();
+        fphb_payload.extend_from_slice(&heap);
+        let mut dthp_payload = vec![0, 1, 0, 1];
         let records = [
             {
                 let mut record = (vi_payload.len() as u32).to_be_bytes().to_vec();
@@ -687,15 +724,14 @@ mod tests {
                 record
             },
             {
-                let coded = zlib_coded(&dfds_payload);
+                let coded = zlib_coded(&fphb_payload);
                 let mut record = (coded.len() as u32).to_be_bytes().to_vec();
                 record.extend_from_slice(&coded);
                 record
             },
             {
-                let coded = zlib_coded(&tm80_payload);
-                let mut record = (coded.len() as u32).to_be_bytes().to_vec();
-                record.extend_from_slice(&coded);
+                let mut record = (dthp_payload.len() as u32).to_be_bytes().to_vec();
+                record.append(&mut dthp_payload);
                 record
             },
             {
@@ -731,7 +767,7 @@ mod tests {
         put(&mut bytes, info_offset + 48, info_size as u32);
         let table = info_offset + table_header_size;
         put(&mut bytes, table, (block_count - 1) as u32);
-        let names = [b"LVSR", b"DFDS", b"TM80", b"VCTP"];
+        let names = [b"LVSR", b"FPHb", b"DTHP", b"VCTP"];
         for index in 0..block_count {
             let block = table + 4 + 12 * index;
             bytes[block..block + 4].copy_from_slice(names[index]);
@@ -1207,12 +1243,17 @@ mod tests {
         assert_eq!(
             facts.default_string_values,
             Some(vec![super::super::DefaultStringValue {
-                type_map_index: 1,
+                type_index: 1,
                 field_path: Vec::new(),
                 labels: vec![b"Password".to_vec()],
-                bytes: b"token".to_vec(),
+                bytes: b"hunter22".to_vec(),
             }])
         );
+        let finding = crate::rules::sast::BUILT_INS[0]
+            .check(&facts, None)
+            .unwrap();
+        assert!(finding.contains("\"Password\" (credential-named control)"));
+        assert!(!finding.contains("hunter22"));
         assert!(
             super::super::read_facts_with_orphaned_vi(
                 std::path::Path::new("ordinary.vi"),

@@ -1,301 +1,163 @@
-//! Bounded extraction of string defaults from a VI's typed `DFDS` data space.
+//! Bounded extraction of string defaults from a VI's front-panel controls.
 //!
-//! The reader walks every selected type-map entry in order because the saved
-//! values are an unkeyed byte stream. It decodes supported non-string values
-//! only far enough to advance safely to later strings.
+//! Each control in the `FPHb` front-panel heap that has a non-empty default
+//! stores it as `DefaultData`, in LabVIEW's flattened form, together with a heap
+//! TypeID. `DTHP` maps heap TypeIDs onto a slice of the `VCTP` consolidated type
+//! pool. This reader resolves each control's Type Descriptor, walks its
+//! flattened value, and records every string it contains with the labels on its
+//! path. Controls are independent, so a control whose type this reader cannot
+//! decode is skipped without affecting the others.
 
+use super::heap::ControlDefault;
 use super::{Version, connector, invalid, rsrc};
-use flate2::bufread::ZlibDecoder;
-use std::io::{self, Read};
+use std::io;
 
-const MAX_SECTION_SIZE: usize = 64 * 1024 * 1024;
 const MAX_TYPE_COUNT: usize = 1_000_000;
 const MAX_WALK_NODES: usize = 1_000_000;
 const MAX_NESTING_DEPTH: usize = 128;
-const FLAG_DEFAULT_DATA: u32 = 1 << 13;
-const FLAG_ALIGN_PADDING: u32 = 1;
-const FLAG_SKIP_DATA: u32 = (1 << 3) | (1 << 10) | (1 << 11);
 const TD_FLAG_HAS_LABEL: u8 = 1 << 6;
 const MAX_LABEL_SEARCH: usize = 256;
 
-/// A raw string default and its location within the VI's type map.
+/// A raw string default and its location among the VI's front-panel controls.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DefaultStringValue {
-    /// Type-map entry index associated with this saved value.
-    pub type_map_index: usize,
-    /// Cluster/array element indexes from the type-map entry to this value.
+    /// One-based `VCTP` top-level type index of the control holding the value.
+    pub type_index: usize,
+    /// Cluster/array element indexes from the control's value to this string.
     pub field_path: Vec<usize>,
-    /// Type Descriptor labels from the type-map entry down to this value: one
-    /// entry for the top-level type, then one per `field_path` step. A level
-    /// without a stored label is empty. Bytes are not decoded.
+    /// The control's front-panel name (or type label), then Type Descriptor
+    /// labels for each `field_path` step. Missing labels are empty.
     pub labels: Vec<Vec<u8>>,
     /// Stored bytes, without text decoding or normalization.
     pub bytes: Vec<u8>,
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct VersionInfo {
-    pub(super) version: Version,
-    pub(super) word: u32,
-}
-
-/// Reads the requested VI's type map, consolidated types, and default values.
+/// Decodes the string defaults of front-panel controls.
 ///
-/// The returned strings preserve their raw bytes and one-based type-map
-/// indexes. Missing sections, malformed offsets, and unsupported serialized
-/// types are `InvalidData` errors.
+/// `dthp` is the `DTHP` block's `(count, index_shift)` slice of `VCTP`.
+/// Malformed `VCTP` data or a control TypeID outside that slice is an
+/// `InvalidData` error; a control whose value uses an unsupported type, or
+/// does not match its type, is skipped.
 pub(super) fn read_default_strings(
-    table: &[u8],
-    table_size: usize,
-    data: &[u8],
-    dfds: (usize, usize),
-    tm80: (usize, usize),
-    vctp: (usize, usize),
-    version: VersionInfo,
+    types: &[u8],
+    dthp: (usize, usize),
+    controls: &[ControlDefault],
+    version: Version,
 ) -> io::Result<Vec<DefaultStringValue>> {
-    let dfds = read_section(table, table_size, data, dfds, b"DFDS", version.version)
-        .map_err(|error| invalid(format!("DFDS default data: {error}")))?;
-    let tm80 = read_section(table, table_size, data, tm80, b"TM80", version.version)
-        .map_err(|error| invalid(format!("TM80 type map: {error}")))?;
-    let types = connector::read_vctp(table, table_size, data, vctp)
-        .map_err(|error| invalid(format!("VCTP type pool: {error}")))?;
-    let (flat_offsets, top_level) = connector::parse_vctp_lists(&types)
+    let (flat_offsets, top_level) = connector::parse_vctp_lists(types)
         .map_err(|error| invalid(format!("VCTP TypeDesc lists: {error}")))?;
-    let (index_shift, flags) = parse_type_map(&tm80)
-        .map_err(|error| invalid(format!("TM80 type-map decoding: {error}")))?;
-    walk_default_data(
-        &types,
-        &flat_offsets,
-        &top_level,
-        &flags,
-        index_shift,
-        &dfds,
-        version,
-    )
-    .map_err(|error| invalid(format!("DFDS value decoding: {error}")))
+    let (count, index_shift) = dthp;
+    let mut output = Vec::new();
+    for control in controls {
+        if control.type_id == 0 || control.type_id > count {
+            return Err(invalid(
+                "FPHb control TypeID is outside the DTHP type slice",
+            ));
+        }
+        let type_index = index_shift
+            .checked_add(control.type_id - 1)
+            .ok_or_else(|| invalid("DTHP type index overflow"))?;
+        let flat = top_level_type(&top_level, type_index)?;
+        let mut strings = Vec::new();
+        let mut cursor = 0;
+        let decoded = walk_fill(
+            &Walk {
+                types,
+                flat_offsets: &flat_offsets,
+                data: &control.data,
+                version,
+                type_index,
+            },
+            flat,
+            &mut cursor,
+            &mut ValuePath::default(),
+            &mut strings,
+            &mut 0,
+            0,
+        );
+        if decoded.is_ok() && cursor == control.data.len() {
+            if let Some(label) = control.label.as_ref().filter(|label| !label.is_empty()) {
+                for value in &mut strings {
+                    value.labels[0].clone_from(label);
+                }
+            }
+            output.append(&mut strings);
+        }
+    }
+    Ok(output)
 }
 
-/// Reads one section's payload, applying its version-dependent compression.
-fn read_section(
+/// Reads `DTHP`'s `(count, index_shift)` slice of the `VCTP` type pool.
+///
+/// LabVIEW omits the shift when the count is zero. Any other layout,
+/// including LabVIEW 7.1 and older, is an `InvalidData` error.
+pub(super) fn read_dthp(
     table: &[u8],
     table_size: usize,
     data: &[u8],
     (count_minus_one, section_offset): (usize, usize),
-    name: &[u8; 4],
-    version: Version,
-) -> io::Result<Vec<u8>> {
+) -> io::Result<(usize, usize)> {
     if count_minus_one != 0 || section_offset < table_size {
-        return Err(invalid(format!(
-            "unsupported {} section table",
-            String::from_utf8_lossy(name)
-        )));
+        return Err(invalid("unsupported DTHP section table"));
     }
-    let section = rsrc::slice(table, section_offset, 20).map_err(|error| {
-        invalid(format!(
-            "invalid {} section descriptor: {error}",
-            name_text(name)
-        ))
-    })?;
+    let section = rsrc::slice(table, section_offset, 20)?;
     if rsrc::number(section, 0)? != 0 {
-        return Err(invalid(format!(
-            "unsupported {} section index",
-            String::from_utf8_lossy(name)
-        )));
+        return Err(invalid("unsupported DTHP section index"));
     }
     let record_offset = rsrc::number(section, 12)?;
     let record = rsrc::slice(
         data,
         record_offset,
         data.len().saturating_sub(record_offset),
-    )
-    .map_err(|error| invalid(format!("invalid {} data record: {error}", name_text(name))))?;
-    let payload = rsrc::slice(record, 4, rsrc::number(record, 0)?)
-        .map_err(|error| invalid(format!("invalid {} payload: {error}", name_text(name))))?;
-    let compressed = match name {
-        b"TM80" => version.major >= 10,
-        b"DFDS" => version.major >= 8,
-        _ => false,
-    };
-    if compressed {
-        decode_zlib_section(payload, name)
-    } else {
-        if payload.len() > MAX_SECTION_SIZE {
-            return Err(invalid(format!(
-                "{} section exceeds the size limit",
-                name_text(name)
-            )));
-        }
-        Ok(payload.to_vec())
-    }
-}
-
-fn name_text(name: &[u8; 4]) -> &'static str {
-    match name {
-        b"TM80" => "TM80",
-        b"DFDS" => "DFDS",
-        _ => "unknown",
-    }
-}
-
-/// Decompresses a length-prefixed zlib section within the shared size bound.
-fn decode_zlib_section(payload: &[u8], name: &[u8; 4]) -> io::Result<Vec<u8>> {
-    if payload.len() < 4 {
-        return Err(invalid(format!(
-            "truncated {} compressed section",
-            String::from_utf8_lossy(name)
-        )));
-    }
-    let expected = rsrc::number(payload, 0)?;
-    if expected > MAX_SECTION_SIZE {
-        return Err(invalid(format!(
-            "{} section exceeds the size limit",
-            String::from_utf8_lossy(name)
-        )));
-    }
-    let compressed = &payload[4..];
-    let mut decoder = ZlibDecoder::new(compressed);
-    let mut decoded = Vec::new();
-    decoder
-        .by_ref()
-        .take((MAX_SECTION_SIZE + 1) as u64)
-        .read_to_end(&mut decoded)
-        .map_err(|error| {
-            invalid(format!(
-                "invalid compressed {} section: {error}",
-                String::from_utf8_lossy(name)
-            ))
-        })?;
-    if decoded.len() != expected || decoder.total_in() as usize != compressed.len() {
-        return Err(invalid(format!(
-            "inconsistent compressed {} section length",
-            String::from_utf8_lossy(name)
-        )));
-    }
-    Ok(decoded)
-}
-
-/// Reads TM80's index shift and per-type flags, rejecting trailing bytes.
-fn parse_type_map(bytes: &[u8]) -> io::Result<(usize, Vec<u32>)> {
+    )?;
+    let payload = rsrc::slice(record, 4, rsrc::number(record, 0)?)?;
     let mut cursor = 0;
-    let count = connector::read_variable(bytes, &mut cursor)?;
-    if count > MAX_TYPE_COUNT {
-        return Err(invalid("TM80 type-map count exceeds the size limit"));
-    }
+    let count = connector::read_variable(payload, &mut cursor)?;
     let index_shift = if count == 0 {
         0
     } else {
-        connector::read_variable(bytes, &mut cursor)?
+        connector::read_variable(payload, &mut cursor)?
     };
-    let mut flags = Vec::with_capacity(count);
-    for _ in 0..count {
-        flags.push(
-            u32::try_from(connector::read_variable(bytes, &mut cursor)?)
-                .map_err(|_| invalid("TM80 type-map flags exceed 32 bits"))?,
-        );
+    if cursor != payload.len() {
+        return Err(invalid("unexpected DTHP heap type slice layout"));
     }
-    if cursor != bytes.len() {
-        return Err(invalid("unexpected trailing data in TM80 type map"));
-    }
-    Ok((index_shift, flags))
+    Ok((count, index_shift))
 }
 
-/// Walks selected defaults sequentially; every branch must consume its full value.
-fn walk_default_data(
-    types: &[u8],
-    flat_offsets: &[usize],
-    top_level: &[usize],
-    type_map: &[u32],
-    index_shift: usize,
-    data: &[u8],
-    version: VersionInfo,
-) -> io::Result<Vec<DefaultStringValue>> {
-    let mut cursor = 0;
-    let mut output = Vec::new();
-    let mut budget = 0;
-    for (entry_offset, flags) in type_map.iter().copied().enumerate() {
-        if flags & FLAG_SKIP_DATA != 0 {
-            continue;
-        }
-        let type_map_index = index_shift
-            .checked_add(entry_offset)
-            .ok_or_else(|| invalid("TM80 type-map index overflow"))?;
-        if flags & (FLAG_DEFAULT_DATA | FLAG_ALIGN_PADDING) == 0 {
-            let flat = top_level_type(top_level, type_map_index)?;
-            if descriptor_kind(types, flat_offsets, flat)? == 0x50
-                && flags & ((1 << 2) | (1 << 4) | (1 << 5) | (1 << 6)) != 0
-            {
-                walk_fill(
-                    types,
-                    flat_offsets,
-                    flat,
-                    flags,
-                    data,
-                    &mut cursor,
-                    version.version,
-                    type_map_index,
-                    &mut ValuePath::default(),
-                    &mut output,
-                    &mut budget,
-                    version.word,
-                    0,
-                )?;
-            }
-            continue;
-        }
-        let flat = top_level_type(top_level, type_map_index)?;
-        walk_fill(
-            types,
-            flat_offsets,
-            flat,
-            flags,
-            data,
-            &mut cursor,
-            version.version,
-            type_map_index,
-            &mut ValuePath::default(),
-            &mut output,
-            &mut budget,
-            version.word,
-            0,
-        )?;
-    }
-    if cursor != data.len() {
-        return Err(invalid("unconsumed bytes remain in DFDS data"));
-    }
-    Ok(output)
-}
-
-#[allow(clippy::too_many_arguments)]
-/// Advances one typed value and records any nested string defaults.
-///
-/// `cursor` is shared across the whole DFDS stream; `path` is pushed and
-/// popped around every Type Descriptor and recursive cluster/array value.
-fn walk_fill(
-    types: &[u8],
-    flat_offsets: &[usize],
-    flat_index: usize,
-    type_map_flags: u32,
-    data: &[u8],
-    cursor: &mut usize,
+/// Inputs shared by every step of one control's value walk.
+struct Walk<'a> {
+    types: &'a [u8],
+    flat_offsets: &'a [usize],
+    data: &'a [u8],
     version: Version,
-    type_map_index: usize,
+    type_index: usize,
+}
+
+/// Advances one flattened value and records any nested string defaults.
+///
+/// `cursor` indexes the control's flattened data; `path` is pushed and popped
+/// around every Type Descriptor and recursive cluster/array value.
+fn walk_fill(
+    walk: &Walk,
+    flat_index: usize,
+    cursor: &mut usize,
     path: &mut ValuePath,
     output: &mut Vec<DefaultStringValue>,
     budget: &mut usize,
-    version_word: u32,
     depth: usize,
 ) -> io::Result<()> {
     *budget = budget
         .checked_add(1)
-        .ok_or_else(|| invalid("DFDS traversal budget overflow"))?;
+        .ok_or_else(|| invalid("default value traversal budget overflow"))?;
     if *budget > MAX_WALK_NODES || depth > MAX_NESTING_DEPTH {
         return Err(invalid(
-            "DFDS type nesting or element count exceeds the limit",
+            "default value nesting or element count exceeds the limit",
         ));
     }
-    let mut descriptor = descriptor(types, flat_offsets, flat_index)?;
+    let data = walk.data;
+    let mut descriptor = descriptor(walk.types, walk.flat_offsets, flat_index)?;
     path.labels.push(std::mem::take(&mut descriptor.label));
-    // Errors abort the whole walk, so the label only needs popping on success.
+    // Errors abort this control's walk, so the label only needs popping on success.
     let result = match descriptor.kind {
         0x00 => Ok(()),
         0x01 | 0x05 | 0x15 => skip(data, cursor, 1),
@@ -310,7 +172,7 @@ fn walk_fill(
         0x21 => skip(
             data,
             cursor,
-            if version.major > 4 || version.minor >= 5 {
+            if walk.version.major > 4 || walk.version.minor >= 5 {
                 1
             } else {
                 2
@@ -320,7 +182,7 @@ fn walk_fill(
             let length = read_u32(data, cursor)?;
             let bytes = take(data, cursor, length)?.to_vec();
             output.push(DefaultStringValue {
-                type_map_index,
+                type_index: walk.type_index,
                 field_path: path.fields.clone(),
                 labels: path.labels.clone(),
                 bytes,
@@ -340,60 +202,28 @@ fn walk_fill(
                 let length = read_u32(data, cursor)? & 0x7fff_ffff;
                 element_count = element_count
                     .checked_mul(length)
-                    .ok_or_else(|| invalid("DFDS array element count overflow"))?;
+                    .ok_or_else(|| invalid("array element count overflow"))?;
                 if element_count > MAX_WALK_NODES {
-                    return Err(invalid("DFDS array element count exceeds the limit"));
+                    return Err(invalid("array element count exceeds the limit"));
                 }
             }
             for index in 0..element_count {
                 path.fields.push(index);
-                walk_fill(
-                    types,
-                    flat_offsets,
-                    element,
-                    type_map_flags,
-                    data,
-                    cursor,
-                    version,
-                    type_map_index,
-                    path,
-                    output,
-                    budget,
-                    version_word,
-                    depth + 1,
-                )?;
+                walk_fill(walk, element, cursor, path, output, budget, depth + 1)?;
                 path.fields.pop();
             }
             Ok(())
         }
         0x50 => {
-            let children =
-                special_cluster_children(&descriptor.clients, type_map_flags, version_word)?;
-            for (index, child) in children {
+            for (index, child) in descriptor.clients.iter().copied().enumerate() {
                 path.fields.push(index);
-                walk_fill(
-                    types,
-                    flat_offsets,
-                    child,
-                    type_map_flags,
-                    data,
-                    cursor,
-                    version,
-                    type_map_index,
-                    path,
-                    output,
-                    budget,
-                    version_word,
-                    depth + 1,
-                )?;
+                walk_fill(walk, child, cursor, path, output, budget, depth + 1)?;
                 path.fields.pop();
             }
             Ok(())
         }
-        0x31 => Err(invalid("unsupported String2 DFDS value")),
-        0x32 => Err(invalid("unsupported Path DFDS value")),
         kind => Err(invalid(format!(
-            "unsupported TypeDesc kind 0x{kind:02x} in DFDS"
+            "unsupported TypeDesc kind 0x{kind:02x} in a default value"
         ))),
     };
     path.labels.pop();
@@ -407,56 +237,11 @@ struct ValuePath {
     labels: Vec<Vec<u8>>,
 }
 
-/// Selects serialized children for known special type-map cluster flags.
-fn special_cluster_children(
-    clients: &[usize],
-    flags: u32,
-    version_word: u32,
-) -> io::Result<Vec<(usize, usize)>> {
-    let selected = if flags & (1 << 2) != 0 {
-        let version = (
-            ((version_word >> 28) & 0x0f) * 10 + ((version_word >> 24) & 0x0f),
-            (version_word >> 20) & 0x0f,
-            (version_word >> 16) & 0x0f,
-            (version_word >> 13) & 0x07,
-        );
-        if version < (10, 0, 0, 2) {
-            vec![2]
-        } else {
-            vec![1]
-        }
-    } else if flags & (1 << 4) != 0 {
-        vec![1, 2, 3]
-    } else if flags & (1 << 5) != 0 {
-        vec![3]
-    } else if flags & (1 << 6) != 0 {
-        vec![2]
-    } else {
-        return Ok(clients.iter().copied().enumerate().collect());
-    };
-    let mut values = Vec::with_capacity(selected.len());
-    for index in selected {
-        let child = *clients
-            .get(index)
-            .ok_or_else(|| invalid("special DSTM cluster child index is out of range"))?;
-        values.push((index, child));
-    }
-    if flags & (1 << 9) != 0 && !values.is_empty() {
-        values.remove(0);
-    }
-    Ok(values)
-}
-
 struct TypeDescriptor {
     kind: u8,
     dimensions: Option<usize>,
     clients: Vec<usize>,
     label: Vec<u8>,
-}
-
-/// Returns one flat Type Descriptor's type code after validating its range.
-fn descriptor_kind(types: &[u8], offsets: &[usize], index: usize) -> io::Result<u8> {
-    Ok(descriptor(types, offsets, index)?.kind)
 }
 
 /// Reads the structural fields needed to walk a cluster or array, plus the
@@ -544,15 +329,15 @@ fn trailing_label(rest: &[u8]) -> &[u8] {
         .unwrap_or_default()
 }
 
-/// Resolves a one-based type-map index through VCTP's top-level list.
-fn top_level_type(top_level: &[usize], type_map_index: usize) -> io::Result<usize> {
-    if type_map_index == 0 {
-        return Err(invalid("TM80 type-map index zero is invalid"));
+/// Resolves a one-based type index through VCTP's top-level list.
+fn top_level_type(top_level: &[usize], type_index: usize) -> io::Result<usize> {
+    if type_index == 0 {
+        return Err(invalid("type index zero is invalid"));
     }
     top_level
-        .get(type_map_index - 1)
+        .get(type_index - 1)
         .copied()
-        .ok_or_else(|| invalid("TM80 type-map index is out of range"))
+        .ok_or_else(|| invalid("type index is outside the VCTP top-level list"))
 }
 
 /// Reads one bounded big-endian 16-bit value and advances the cursor.
@@ -583,6 +368,11 @@ fn take<'a>(bytes: &'a [u8], cursor: &mut usize, length: usize) -> io::Result<&'
 mod tests {
     use super::*;
 
+    const VERSION: Version = Version {
+        major: 24,
+        minor: 0,
+    };
+
     fn variable(value: usize) -> Vec<u8> {
         assert!(value < 0x8000);
         (value as u16).to_be_bytes().to_vec()
@@ -592,6 +382,15 @@ mod tests {
         let mut bytes = (4u16 + body.len() as u16).to_be_bytes().to_vec();
         bytes.extend_from_slice(&[0, kind]);
         bytes.extend_from_slice(body);
+        bytes
+    }
+
+    fn labeled(kind: u8, body: &[u8], label: &[u8]) -> Vec<u8> {
+        let mut contents = body.to_vec();
+        contents.push(label.len() as u8);
+        contents.extend_from_slice(label);
+        let mut bytes = type_desc(kind, &contents);
+        bytes[2] = TD_FLAG_HAS_LABEL;
         bytes
     }
 
@@ -607,183 +406,187 @@ mod tests {
         bytes
     }
 
-    fn type_map(index_shift: usize, flags: &[u32]) -> Vec<u8> {
-        let mut bytes = variable(flags.len());
-        if !flags.is_empty() {
-            bytes.extend_from_slice(&variable(index_shift));
-            for flag in flags {
-                bytes.extend_from_slice(&variable(*flag as usize));
-            }
-        }
+    fn string(value: &[u8]) -> Vec<u8> {
+        let mut bytes = (value.len() as u32).to_be_bytes().to_vec();
+        bytes.extend_from_slice(value);
         bytes
+    }
+
+    fn control(type_id: usize, data: Vec<u8>) -> ControlDefault {
+        ControlDefault {
+            type_id,
+            label: None,
+            data,
+        }
     }
 
     fn defaults(
         pool: &[u8],
-        map: &[u8],
-        data: &[u8],
-        version: Version,
+        dthp: (usize, usize),
+        controls: &[ControlDefault],
     ) -> io::Result<Vec<DefaultStringValue>> {
-        let (offsets, top_level) = connector::parse_vctp_lists(pool)?;
-        let (index_shift, flags) = parse_type_map(map)?;
-        walk_default_data(
-            pool,
-            &offsets,
-            &top_level,
-            &flags,
-            index_shift,
-            data,
-            VersionInfo {
-                version,
-                word: version_word(version),
-            },
-        )
-    }
-
-    fn version_word(version: Version) -> u32 {
-        (((version.major / 10) as u32) << 28)
-            | (((version.major % 10) as u32) << 24)
-            | ((version.minor as u32) << 20)
-            | (4 << 13)
+        read_default_strings(pool, dthp, controls, VERSION)
     }
 
     #[test]
-    fn walks_mixed_scalar_defaults_to_extract_strings() {
+    fn resolves_controls_through_the_dthp_slice() {
         let pool = type_pool(
             &[
-                type_desc(0x03, &[]),
-                type_desc(0x21, &[]),
-                type_desc(0x30, &[]),
+                type_desc(0x00, &[]),
+                labeled(0x03, &[], b"Count"),
+                labeled(0x30, &[0xff; 4], b"DB Password"),
             ],
-            &[0, 1, 2],
+            &[0, 1, 1, 2, 2],
         );
-        let mut data = 42i32.to_be_bytes().to_vec();
-        data.push(1);
-        data.extend_from_slice(&3u32.to_be_bytes());
-        data.extend_from_slice(b"key");
+        let values = defaults(
+            &pool,
+            (4, 2),
+            &[
+                control(1, 42u32.to_be_bytes().to_vec()),
+                control(3, string(b"hunter22")),
+            ],
+        )
+        .unwrap();
         assert_eq!(
-            defaults(
-                &pool,
-                &type_map(
-                    1,
-                    &[FLAG_DEFAULT_DATA, FLAG_DEFAULT_DATA, FLAG_DEFAULT_DATA],
-                ),
-                &data,
-                Version {
-                    major: 20,
-                    minor: 0
-                }
-            )
-            .unwrap(),
+            values,
             vec![DefaultStringValue {
-                type_map_index: 3,
+                type_index: 4,
                 field_path: Vec::new(),
-                labels: vec![Vec::new()],
-                bytes: b"key".to_vec()
+                labels: vec![b"DB Password".to_vec()],
+                bytes: b"hunter22".to_vec(),
             }]
         );
     }
 
     #[test]
-    fn walks_cluster_and_array_string_members() {
-        let cluster = type_desc(0x50, &[0, 2, 0, 0, 0, 0]);
-        let array = type_desc(0x40, &[0, 1, 0, 0, 0, 2, 0, 0]);
-        let pool = type_pool(&[type_desc(0x30, &[]), cluster, array], &[1, 2]);
-        let mut data = 1u32.to_be_bytes().to_vec();
-        data.extend_from_slice(b"a");
-        data.extend_from_slice(&2u32.to_be_bytes());
-        data.extend_from_slice(b"bc");
-        let mut array_data = 2u32.to_be_bytes().to_vec();
-        for value in [b"x".as_slice(), b"yz".as_slice()] {
-            array_data.extend_from_slice(&(value.len() as u32).to_be_bytes());
-            array_data.extend_from_slice(value);
-        }
-        data.extend_from_slice(&array_data);
-        let values = defaults(
-            &pool,
-            &type_map(1, &[FLAG_DEFAULT_DATA, FLAG_DEFAULT_DATA]),
-            &data,
-            Version {
-                major: 20,
-                minor: 0,
-            },
-        )
-        .unwrap();
+    fn walks_cluster_and_array_members_with_their_labels() {
+        let pool = type_pool(
+            &[
+                labeled(0x30, &[0xff; 4], b"API Key"),
+                type_desc(0x21, &[]),
+                labeled(0x50, &[0, 2, 0, 1, 0, 0], b"Settings"),
+                type_desc(0x40, &[0, 1, 0xff, 0xff, 0xff, 0xff, 0, 0]),
+            ],
+            &[2, 3],
+        );
+        let mut cluster = vec![1];
+        cluster.extend_from_slice(&string(b"key-1"));
+        let mut array = 2u32.to_be_bytes().to_vec();
+        array.extend_from_slice(&string(b"x"));
+        array.extend_from_slice(&string(b"yz"));
+        let values = defaults(&pool, (2, 1), &[control(1, cluster), control(2, array)]).unwrap();
+        let located = values
+            .iter()
+            .map(|value| {
+                (
+                    value.type_index,
+                    value.field_path.clone(),
+                    value.labels.clone(),
+                    value.bytes.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
-            values,
+            located,
             vec![
-                DefaultStringValue {
-                    type_map_index: 1,
-                    field_path: vec![0],
-                    labels: vec![Vec::new(), Vec::new()],
-                    bytes: b"a".to_vec(),
-                },
-                DefaultStringValue {
-                    type_map_index: 1,
-                    field_path: vec![1],
-                    labels: vec![Vec::new(), Vec::new()],
-                    bytes: b"bc".to_vec(),
-                },
-                DefaultStringValue {
-                    type_map_index: 2,
-                    field_path: vec![0],
-                    labels: vec![Vec::new(), Vec::new()],
-                    bytes: b"x".to_vec(),
-                },
-                DefaultStringValue {
-                    type_map_index: 2,
-                    field_path: vec![1],
-                    labels: vec![Vec::new(), Vec::new()],
-                    bytes: b"yz".to_vec(),
-                },
+                (
+                    1,
+                    vec![1],
+                    vec![b"Settings".to_vec(), b"API Key".to_vec()],
+                    b"key-1".to_vec()
+                ),
+                (
+                    2,
+                    vec![0],
+                    vec![Vec::new(), b"API Key".to_vec()],
+                    b"x".to_vec()
+                ),
+                (
+                    2,
+                    vec![1],
+                    vec![Vec::new(), b"API Key".to_vec()],
+                    b"yz".to_vec()
+                ),
             ]
         );
     }
 
     #[test]
-    fn attaches_type_descriptor_labels_along_the_value_path() {
-        fn labeled(kind: u8, body: &[u8], label: &[u8]) -> Vec<u8> {
-            let mut contents = body.to_vec();
-            contents.push(label.len() as u8);
-            contents.extend_from_slice(label);
-            let mut bytes = type_desc(kind, &contents);
-            bytes[2] = TD_FLAG_HAS_LABEL;
-            bytes
-        }
-
+    fn prefers_control_name_and_preserves_nested_type_labels() {
         let pool = type_pool(
             &[
-                labeled(0x30, &[0xff; 4], b"DB Password"),
-                type_desc(0x30, &[0xff; 4]),
-                labeled(0x50, &[0, 2, 0, 0, 0, 1], b"Settings"),
+                labeled(0x30, &[0xff; 4], b"Member"),
+                labeled(0x50, &[0, 1, 0, 0], b"Old Type Name"),
             ],
-            &[2],
+            &[0, 1],
         );
-        let mut data = Vec::new();
-        for value in [b"secret".as_slice(), b"plain".as_slice()] {
-            data.extend_from_slice(&(value.len() as u32).to_be_bytes());
-            data.extend_from_slice(value);
-        }
+        let mut named = control(2, string(b"value"));
+        named.label = Some(b"Settings".to_vec());
+        let mut empty = control(1, string(b"fallback"));
+        empty.label = Some(Vec::new());
+        let values = defaults(&pool, (2, 1), &[named, empty]).unwrap();
+        assert_eq!(
+            values[0].labels,
+            vec![b"Settings".to_vec(), b"Member".to_vec()]
+        );
+        assert_eq!(values[1].labels, vec![b"Member".to_vec()]);
+    }
+
+    #[test]
+    fn skips_controls_that_cannot_be_decoded_without_losing_others() {
+        let pool = type_pool(
+            &[type_desc(0x30, &[0xff; 4]), type_desc(0x64, &[])],
+            &[0, 1],
+        );
+        let mut trailing = string(b"ok");
+        trailing.push(0);
         let values = defaults(
             &pool,
-            &type_map(1, &[FLAG_DEFAULT_DATA]),
-            &data,
-            Version {
-                major: 20,
-                minor: 0,
-            },
+            (2, 1),
+            &[
+                control(2, vec![1, 2, 3]),
+                control(1, vec![0, 0, 0, 9, b'a']),
+                control(1, trailing),
+                control(1, string(b"kept")),
+            ],
         )
         .unwrap();
         assert_eq!(
-            values
-                .iter()
-                .map(|value| value.labels.clone())
-                .collect::<Vec<_>>(),
-            vec![
-                vec![b"Settings".to_vec(), b"DB Password".to_vec()],
-                vec![b"Settings".to_vec(), Vec::new()],
-            ]
+            values.iter().map(|value| &value.bytes).collect::<Vec<_>>(),
+            vec![b"kept"]
         );
+    }
+
+    #[test]
+    fn rejects_type_ids_outside_the_dthp_slice_or_vctp() {
+        let pool = type_pool(&[type_desc(0x30, &[0xff; 4])], &[0]);
+        for (dthp, type_id) in [((1, 1), 2), ((1, 1), 0), ((2, 1), 2)] {
+            assert!(
+                defaults(&pool, dthp, &[control(type_id, string(b"x"))]).is_err(),
+                "{dthp:?} {type_id}"
+            );
+        }
+        let bad_cluster = type_pool(&[type_desc(0x50, &[0, 1, 0, 5])], &[0]);
+        assert!(
+            defaults(&bad_cluster, (1, 1), &[control(1, Vec::new())])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn reads_dthp_slices_and_rejects_unexpected_layouts() {
+        fn dthp(payload: &[u8]) -> io::Result<(usize, usize)> {
+            let mut data = (payload.len() as u32).to_be_bytes().to_vec();
+            data.extend_from_slice(payload);
+            let mut table = vec![0; 60];
+            table[52..56].copy_from_slice(&0u32.to_be_bytes());
+            read_dthp(&table, 40, &data, (0, 40))
+        }
+        assert_eq!(dthp(&[0, 11, 0, 3]).unwrap(), (11, 3));
+        assert_eq!(dthp(&[0, 0]).unwrap(), (0, 0));
+        assert!(dthp(&[0, 11]).is_err());
+        assert!(dthp(&[0, 1, 0, 3, 0]).is_err());
     }
 
     #[test]
@@ -792,183 +595,5 @@ mod tests {
         assert_eq!(trailing_label(b"\x02a\x01"), b"");
         assert_eq!(trailing_label(b"\x03ab"), b"");
         assert_eq!(trailing_label(b""), b"");
-    }
-
-    #[test]
-    fn skips_entries_without_saved_data_and_errors_on_unsupported_types() {
-        let pool = type_pool(&[type_desc(0x5f, &[])], &[0]);
-        assert!(
-            defaults(
-                &pool,
-                &type_map(1, &[1 << 3]),
-                &[],
-                Version {
-                    major: 20,
-                    minor: 0
-                }
-            )
-            .unwrap()
-            .is_empty()
-        );
-        assert!(
-            defaults(
-                &pool,
-                &type_map(1, &[FLAG_DEFAULT_DATA]),
-                &[],
-                Version {
-                    major: 20,
-                    minor: 0
-                }
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("unsupported TypeDesc kind")
-        );
-    }
-
-    #[test]
-    fn rejects_truncated_values_and_invalid_client_indices() {
-        let string_pool = type_pool(&[type_desc(0x30, &[])], &[0]);
-        assert!(
-            defaults(
-                &string_pool,
-                &type_map(1, &[FLAG_DEFAULT_DATA]),
-                &[0, 0, 0, 4, b'a'],
-                Version {
-                    major: 20,
-                    minor: 0
-                }
-            )
-            .is_err()
-        );
-        let bad_cluster = type_pool(&[type_desc(0x50, &[0, 1])], &[0]);
-        assert!(
-            defaults(
-                &bad_cluster,
-                &type_map(1, &[FLAG_DEFAULT_DATA]),
-                &[],
-                Version {
-                    major: 20,
-                    minor: 0
-                }
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn reads_zlib_coded_default_data_from_rsrc_sections() {
-        use flate2::Compression;
-        use flate2::write::ZlibEncoder;
-        use std::io::Write;
-
-        fn coded(payload: &[u8]) -> Vec<u8> {
-            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-            encoder.write_all(payload).unwrap();
-            let mut bytes = (payload.len() as u32).to_be_bytes().to_vec();
-            bytes.extend_from_slice(&encoder.finish().unwrap());
-            bytes
-        }
-
-        fn record(payload: &[u8]) -> Vec<u8> {
-            let mut bytes = (payload.len() as u32).to_be_bytes().to_vec();
-            bytes.extend_from_slice(payload);
-            bytes
-        }
-
-        let pool = type_pool(&[type_desc(0x30, &[])], &[0]);
-        let map = type_map(1, &[FLAG_DEFAULT_DATA]);
-        let mut default_data = 2u32.to_be_bytes().to_vec();
-        default_data.extend_from_slice(b"ok");
-        let records = [
-            record(&coded(&default_data)),
-            record(&coded(&map)),
-            record(&coded(&pool)),
-        ];
-        let mut data = Vec::new();
-        let mut offsets = Vec::new();
-        for record in records {
-            offsets.push(data.len());
-            data.extend_from_slice(&record);
-        }
-        let section_offsets = [40usize, 60, 80];
-        let mut table = vec![0; 100];
-        table[..4].copy_from_slice(&2u32.to_be_bytes());
-        for (index, record_offset) in offsets.iter().copied().enumerate() {
-            let section_offset = section_offsets[index];
-            table[section_offset + 12..section_offset + 16]
-                .copy_from_slice(&(record_offset as u32).to_be_bytes());
-        }
-
-        assert_eq!(
-            read_default_strings(
-                &table,
-                40,
-                &data,
-                (0, section_offsets[0]),
-                (0, section_offsets[1]),
-                (0, section_offsets[2]),
-                VersionInfo {
-                    version: Version {
-                        major: 20,
-                        minor: 0,
-                    },
-                    word: version_word(Version {
-                        major: 20,
-                        minor: 0,
-                    }),
-                }
-            )
-            .unwrap(),
-            vec![DefaultStringValue {
-                type_map_index: 1,
-                field_path: Vec::new(),
-                labels: vec![Vec::new()],
-                bytes: b"ok".to_vec(),
-            }]
-        );
-    }
-
-    #[test]
-    fn reads_legacy_uncompressed_default_and_type_map_sections() {
-        let payload = [1, 2, 3];
-        let mut record = (payload.len() as u32).to_be_bytes().to_vec();
-        record.extend_from_slice(&payload);
-        let mut table = vec![0; 60];
-        table[52..56].copy_from_slice(&0u32.to_be_bytes());
-
-        assert_eq!(
-            read_section(
-                &table,
-                40,
-                &record,
-                (0, 40),
-                b"TM80",
-                Version { major: 9, minor: 0 },
-            )
-            .unwrap(),
-            payload
-        );
-        assert_eq!(
-            read_section(
-                &table,
-                40,
-                &record,
-                (0, 40),
-                b"DFDS",
-                Version { major: 7, minor: 1 },
-            )
-            .unwrap(),
-            payload
-        );
-    }
-
-    #[test]
-    fn selects_version_dependent_special_cluster_layouts() {
-        assert!(special_cluster_children(&[0, 1, 2], 1 << 2, 0x0900_0000).unwrap() == vec![(2, 2)]);
-        assert_eq!(
-            special_cluster_children(&[0, 1, 2], 1 << 2, 0x1000_c000).unwrap(),
-            vec![(1, 1)]
-        );
     }
 }

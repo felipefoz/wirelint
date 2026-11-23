@@ -745,6 +745,7 @@ fn scans_xml_and_applies_yaml_severity_and_cli_threshold() {
         summary,
         [
             "Found 3 supported LabVIEW file(s). Running enabled rules...",
+            "Scan type: scan (quality)",
             "Analyzed 3 file(s); 2 finding(s); 0 analysis error(s).",
             "Findings by severity: 0 info; 2 warning; 0 error.",
             "Findings by rule:",
@@ -762,7 +763,7 @@ fn scans_xml_and_applies_yaml_severity_and_cli_threshold() {
             assert!(verbose.contains("a.lvproj: warning [separate-compiled-code]"));
             assert!(verbose.contains("c.lvlib: warning [separate-compiled-code]"));
             assert!(!verbose.contains("b.LVCLASS"));
-            assert!(scan_lines_without_timing(&verbose).ends_with(&summary[1..]));
+            assert!(scan_lines_without_timing(&verbose).ends_with(&summary[2..]));
         } else {
             assert_eq!(
                 scan_lines_without_timing(&String::from_utf8(output.stdout).unwrap()),
@@ -994,6 +995,7 @@ fn disabling_all_rules_skips_parsing() {
         scan_lines_without_timing(&stdout),
         [
             "Found 1 supported LabVIEW file(s). Running enabled rules...",
+            "Scan type: scan (quality)",
             "Analyzed 0 file(s); 0 finding(s); 0 analysis error(s).",
         ]
     );
@@ -1015,6 +1017,7 @@ fn passing_scan_omits_empty_breakdowns_in_both_modes() {
             scan_lines_without_timing(&stdout),
             [
                 "Found 1 supported LabVIEW file(s). Running enabled rules...",
+                "Scan type: scan (quality)",
                 "Analyzed 1 file(s); 0 finding(s); 0 analysis error(s).",
             ]
         );
@@ -1145,6 +1148,37 @@ fn sast_rejects_quality_rule_configuration() {
 }
 
 #[test]
+fn sast_reports_control_defaults_in_separated_and_embedded_vis() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sast");
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&fixtures)
+        .arg("--verbose")
+        .output()
+        .unwrap();
+    let stdout =
+        String::from_utf8(output.stdout).unwrap() + &String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stdout}");
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line == "Scan type: sast (security)")
+    );
+    for file in ["credentials-embedded.vi", "credentials-separated.vi"] {
+        assert!(
+            stdout.contains(&format!(
+                "{file}: warning [hardcoded-secret-default]: Possible hardcoded secret in \"Notes\" (credential assignment in text) and 2 other defaults."
+            )),
+            "{stdout}"
+        );
+    }
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+    for secret in ["WLMARK", "Sup3rS3cret", "hunter22"] {
+        assert!(!stdout.contains(secret), "{stdout}");
+    }
+}
+
+#[test]
 fn lists_rules_and_handles_an_empty_folder() {
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
         .arg("rules")
@@ -1171,10 +1205,27 @@ fn lists_rules_and_handles_an_empty_folder() {
             scan_lines_without_timing(&stdout),
             [
                 "No supported LabVIEW files found.",
+                "Scan type: scan (quality)",
                 "Analyzed 0 file(s); 0 finding(s); 0 analysis error(s).",
             ]
         );
     }
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&directory.0)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        scan_lines_without_timing(&stdout),
+        [
+            "No supported LabVIEW files found.",
+            "Scan type: sast (security)",
+            "Analyzed 0 file(s); 0 finding(s); 0 analysis error(s).",
+        ]
+    );
 }
 
 #[test]

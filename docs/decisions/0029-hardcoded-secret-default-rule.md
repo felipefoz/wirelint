@@ -7,7 +7,8 @@
 
 Decision 0026 defines `hardcoded-secret-default` as the first Tier 1 SAST
 rule. Decision 0027 adds bounded extraction of raw string defaults from a
-VI's `DFDS` stream, leaving secret matching to rule consumers. The rule must
+VI's default values (from `FPHb` since decision 0030), leaving secret
+matching to rule consumers. The rule must
 identify useful review candidates without exposing their values in terminal
 or CI reports, and without claiming to perform dataflow analysis.
 
@@ -22,8 +23,9 @@ string control labeled `Password` whose default is the secret itself. It also
 missed quoted JSON keys, XML elements, URL credentials, and well-known token
 formats, and reported masks such as `********` and prompts such as
 `Password: Enter here`. A real VI's `VCTP` pool showed that the Type
-Descriptors selected by `TM80` store each control's label (`HasLabel` flag,
-trailing Pascal string), so labels can be read without the front-panel heap.
+Descriptors of those front-panel controls stored their labels (`HasLabel` flag,
+trailing Pascal string). A later VI showed that this does not hold for every
+control; decision 0030 describes the front-panel name-label reader.
 
 ## Decision
 
@@ -32,8 +34,9 @@ trailing Pascal string), so labels can be read without the front-panel heap.
   `rules::sast::hardcoded_secret`, with its matchers in the same module;
   `rules::sast` only registers rules.
 - Extend the typed default reader to attach a label path to each extracted
-  string: one Type Descriptor label for the type-map entry and one per
-  cluster/array level, empty where none is stored. Locate a label as pylabview
+  string: the control's front-panel name when available, otherwise its Type
+  Descriptor label, and one Type Descriptor label per cluster/array level,
+  empty where none is stored. Locate a descriptor label as pylabview
   does: in the last 256 bytes after the decoded properties, the first length
   byte whose printable text runs exactly to the descriptor's end. A missing
   label is empty, not an error.
@@ -61,11 +64,14 @@ trailing Pascal string), so labels can be read without the front-panel heap.
 - A value is plausible when, after trimming, it has at least four bytes; is
   not a listed placeholder (`changeme`, `example`, `none`, `true`, ...); is
   not one repeated byte; does not start with `$`, `your_`, or `your-`; is not
-  wrapped in `{{ }}`, `< >`, `% %`, or `[ ]`; and contains no prompt word
+  wrapped in `{{ }}`, `< >`, `% %`, or `[ ]`; contains no prompt word
   (`enter`, `please`, `type`, `your`, `here`, `required`, `optional`,
-  `must`). Token formats and private keys do not apply this filter.
+  `must`); and is not prose. A value with whitespace is prose when it ends
+  with `.`, `!`, or `?`, or contains a credential term as a word (`The
+  password is incorrect!`). Bare credential words such as `password`,
+  `secret`, or `token` are placeholders. Token formats and private keys do not apply this filter.
 - Emit at most one finding per file. It names the first match's labels (or
-  its type-map entry and field path), sanitized and truncated to 64
+  its `VCTP` type entry and field path), sanitized and truncated to 64
   characters, names the matching heuristic, and counts other matches. It never
   includes a stored value.
 - Implement matchers as bounded byte scans without a regular-expression
@@ -79,9 +85,9 @@ trailing Pascal string), so labels can be read without the front-panel heap.
 - **Detect every string containing terms such as `password`:** rejected
   because prompts and documentation often mention credentials without
   containing a credential value.
-- **Read labels from the front-panel heap (`FPHb`):** deferred. Type
-  Descriptor labels are already reachable from the default-data walk; the heap
-  would add the "Password Display" flag but needs separate format work.
+- **Use only Type Descriptor labels:** rejected after a real control with an
+  unlabeled descriptor demonstrated that this misses named defaults. The
+  front-panel heap supplies its name; "Password Display" remains out of scope.
 - **Use the `regex` crate:** rejected for now. The token formats are fixed
   prefixes with one character set each, which a small scanner handles without
   a new dependency.
@@ -103,7 +109,7 @@ Matching remains a heuristic: credential-like names with ordinary values can
 be false positives, and values shorter than four bytes or without a recognized
 name or format are missed. The finding message now contains user-chosen label
 text. Findings are review signals, not proof of exploitability. The rule only
-sees `DFDS` defaults supported by the current reader; it does not inspect
+sees front-panel defaults supported by the current reader (decision 0030); it does not inspect
 diagram constants, other data types, or runtime dataflow.
 
 ## References

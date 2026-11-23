@@ -1,7 +1,11 @@
 # Typed default-data reader
 
-- Status: Accepted
+- Status: Superseded in part by [decision 0030](0030-front-panel-defaults-from-source-heap.md)
 - Date: 2026-11-23
+
+> Decision 0030 replaces the `DFDS`/`TM80` source: defaults are read per
+> control from the `FPHb` heap, and compiled-code blocks are not read. The
+> flattened-value walker and its bounds below still apply.
 
 ## Context
 

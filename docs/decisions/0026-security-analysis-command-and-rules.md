@@ -21,7 +21,9 @@ does not support today:
 - A per-VI flags word (already read for `auto-error-handling` and
   `debugging-status`) containing a `RemotePanel` bit.
 - `DFDS`: an independent top-level resource holding front-panel and diagram
-  default values, not reached by walking the block-diagram heap.
+  default values, not reached by walking the block-diagram heap. Decision
+  0030 later found it is compiled data, absent from source-only VIs; defaults
+  are read from the `FPHb` heap instead.
 - Call Library Function Node fields (`funcName`, `tagDLLPath`,
   `tagDLLName`), which exist only as fields on a generic block-diagram heap
   object. Reading them needs new node-subtype recognition in `heap.rs`: more
@@ -50,6 +52,8 @@ excluded entirely rather than deferred to Tier 2.
 - Add a `wirelint sast <folder>` command, parallel to `scan`, not a mode flag
   on `scan`. Reuse `scan::discover_files` and the same candidate
   extensions/exclusions.
+- Print the selected scan type in terminal output for both commands, including
+  empty scans, so shared CI logs identify the rule registry in use.
 - Introduce a second static registry, `SECURITY_BUILT_INS`, next to
   `BUILT_INS`. Generalize `Config::parse`/`Config::load` and
   `analysis::analyze` to accept the active rule slice as a parameter instead
@@ -77,7 +81,8 @@ excluded entirely rather than deferred to Tier 2.
     assert. CWE depends on the matched entry's configured category (for
     example CWE-78 for an OS-command-execution VI); the option's exact shape
     and per-entry CWE tagging are worked out in that rule's own decision.
-  - `hardcoded-secret-default` — scans `DFDS` default string values for
+  - `hardcoded-secret-default` — scans default string values (from `FPHb`
+    since decision 0030) for
     secret-shaped content. CWE-798, CWE-259.
   - `clfn-library-path` — reads CLFN DLL path/name fields once `heap.rs`
     recognizes the node subtype. CWE-427. Higher cost than the other three;
@@ -120,6 +125,8 @@ excluded entirely rather than deferred to Tier 2.
 
 ## Alternatives
 
+- **Infer the scan type from findings:** rejected because scans without
+  findings and summary-only output would not identify the active registry.
 - **One command, a `--security` flag on `scan`:** mixes two audiences/report
   shapes into one report and complicates the failure-threshold story (a
   security finding and a style finding would share one exit code). A

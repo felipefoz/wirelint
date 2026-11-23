@@ -54,18 +54,23 @@ For heuristics 2 and 3, values are ignored when, after trimming, they are
 shorter than four characters, consist of one repeated character (`****`),
 are common placeholders (`changeme`, `example`, `none`, `true`, ...),
 reference a variable or template (`$NAME`, `${NAME}`, `$(NAME)`, `%NAME%`,
-`{{name}}`, `<name>`, `[name]`, `your_...`), or read like user instructions
-(`Enter password here`).
+`{{name}}`, `<name>`, `[name]`, `your_...`), repeat a credential word
+(`password`, `token`), read like user instructions (`Enter password here`), or
+read like a message: text with spaces that ends in `.`, `!`, or `?`, or that
+mentions a credential term (`The password is incorrect!`).
 
 The finding names where the first match was found, using the control's labels
-(for example `"Settings" > "DB Password"`) or its type-map position when no
+(for example `"Settings" > "DB Password"`) or its type entry when no
 label is stored, together with the heuristic that matched. It counts any other
 matching defaults in the file. The message never includes a stored value.
 Findings are review signals, not confirmation of exploitability. Remove the
 credential or load it from an appropriate secret store at runtime.
 
-The rule reads serialized `DFDS` string defaults and the control labels stored
-with their type descriptors. It does not inspect block-diagram string
+The rule reads the default values that front-panel controls store in the VI's
+source, for VIs saved with or without separate compiled code. It uses each
+control's front-panel name when available, falling back to its type descriptor
+label. Nested values use their type descriptor labels. A control whose data type
+the reader does not support is skipped. It does not inspect block-diagram string
 constants, the front panel's "Password Display" setting, or secrets stored in
 other data types. Secrets without a recognized name or format are not
 reported.

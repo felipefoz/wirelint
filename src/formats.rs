@@ -83,7 +83,7 @@ pub struct FileFacts {
     /// Index (0-35) of the VI's connector pane pattern among LabVIEW's 36
     /// fixed terminal layouts; absent for controls and XML containers.
     pub connector_pane_pattern: Option<u8>,
-    /// String defaults decoded from a VI's DFDS data space, when requested.
+    /// String defaults of a VI's front-panel controls, from `FPHb`, when requested.
     pub default_string_values: Option<Vec<DefaultStringValue>>,
 }
 

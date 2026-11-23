@@ -1,5 +1,6 @@
-//! Bounded decoding of version-b block-diagram heaps for free-label bookmarks
-//! and front-panel terminal display styles.
+//! Bounded decoding of version-b object heaps: block-diagram free-label
+//! bookmarks and front-panel terminal display styles from `BDHb`, and
+//! front-panel control defaults and name labels from `FPHb`.
 
 use super::{invalid, rsrc};
 use flate2::bufread::ZlibDecoder;
@@ -15,10 +16,21 @@ const NODE_LIST: i32 = 164;
 const Z_PLANE_LIST: i32 = 303;
 const TEXT_RECORD: i32 = 270;
 const TEXT: i32 = 3;
+const DDO: i32 = 52;
+const PARTS_LIST: i32 = 194;
+const PART_ID: i32 = 192;
+/// `PARTID.NAME_LABEL`, distinct from captions and other label parts.
+const NAME_LABEL: u32 = 16;
 /// `SL__fPTerm`: a front-panel control/indicator's terminal on the block diagram.
 const FP_TERM: i32 = 22;
 /// `OF__objFlags`: the terminal's object-flags field, including its display style.
 const OBJ_FLAGS: i32 = 172;
+/// `SL__fPDCO`: a front-panel control or indicator object in the FPHb heap.
+const FP_DCO: i32 = 18;
+/// `OF__typeDesc`: a heap TypeID field.
+const TYPE_DESC: i32 = 283;
+/// `OF__DefaultData`: an object's default value in flattened form.
+const DEFAULT_DATA: i32 = 571;
 /// Terminal object-flags bit selecting icon-style display; clear is data-type style.
 const ICON_STYLE_FLAG: u32 = 0x0400_0000;
 
@@ -40,19 +52,74 @@ pub(super) fn read_bdhb(
     count_minus_one: usize,
     section_offset: usize,
 ) -> io::Result<(Vec<Vec<u8>>, Vec<bool>)> {
+    let heap = read_heap(
+        "BDHb",
+        table,
+        table_size,
+        data,
+        count_minus_one,
+        section_offset,
+    )?;
+    parse_heap(&heap).map_err(|error| invalid(format!("BDHb heap: {error}")))
+}
+
+/// A front-panel control's stored default value, as kept in its heap object.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct ControlDefault {
+    /// One-based heap TypeID, resolved through `DTHP` into `VCTP`.
+    pub(super) type_id: usize,
+    /// Name label owned by this control's display object, when present.
+    pub(super) label: Option<Vec<u8>>,
+    /// The value in LabVIEW's flattened form, exactly as stored.
+    pub(super) data: Vec<u8>,
+}
+
+/// Reads the sole compressed FPHb section and returns each front-panel
+/// control's stored `DefaultData`, type, and name label.
+///
+/// LabVIEW omits `DefaultData` for an empty or zero default, so a control
+/// without the field is not reported. Malformed or ambiguous label parts
+/// produce an `InvalidData` error.
+pub(super) fn read_fphb(
+    table: &[u8],
+    table_size: usize,
+    data: &[u8],
+    count_minus_one: usize,
+    section_offset: usize,
+) -> io::Result<Vec<ControlDefault>> {
+    let heap = read_heap(
+        "FPHb",
+        table,
+        table_size,
+        data,
+        count_minus_one,
+        section_offset,
+    )?;
+    parse_front_panel(&heap).map_err(|error| invalid(format!("FPHb heap: {error}")))
+}
+
+/// Decompresses one version-b heap section and strips its length prefix.
+fn read_heap(
+    name: &str,
+    table: &[u8],
+    table_size: usize,
+    data: &[u8],
+    count_minus_one: usize,
+    section_offset: usize,
+) -> io::Result<Vec<u8>> {
     if count_minus_one != 0 || section_offset < table_size {
-        return Err(invalid("unsupported BDHb section table"));
+        return Err(invalid(format!("unsupported {name} section table")));
     }
     let section = rsrc::slice(table, section_offset, 20)?;
     if rsrc::number(section, 0)? != 0 {
-        return Err(invalid("unsupported BDHb section index"));
+        return Err(invalid(format!("unsupported {name} section index")));
     }
     let offset = rsrc::number(section, 12)?;
     let record = rsrc::slice(data, offset, data.len().saturating_sub(offset))?;
     let payload = rsrc::slice(record, 4, rsrc::number(record, 0)?)?;
     let expected = rsrc::number(payload, 0)?;
     if expected > MAX_HEAP_SIZE {
-        return Err(invalid("BDHb heap exceeds the size limit"));
+        return Err(invalid(format!("{name} heap exceeds the size limit")));
     }
     let compressed = &payload[4..];
     let mut decoder = ZlibDecoder::new(compressed);
@@ -61,24 +128,40 @@ pub(super) fn read_bdhb(
         .by_ref()
         .take((MAX_HEAP_SIZE + 1) as u64)
         .read_to_end(&mut decoded)
-        .map_err(|error| invalid(format!("invalid compressed BDHb heap: {error}")))?;
+        .map_err(|error| invalid(format!("invalid compressed {name} heap: {error}")))?;
     if decoded.len() != expected || decoder.total_in() as usize != compressed.len() {
-        return Err(invalid("inconsistent compressed BDHb heap length"));
+        return Err(invalid(format!(
+            "inconsistent compressed {name} heap length"
+        )));
     }
     let length = rsrc::number(&decoded, 0)?;
     if length != decoded.len() - 4 {
-        return Err(invalid("inconsistent BDHb heap length"));
+        return Err(invalid(format!("inconsistent {name} heap length")));
     }
-    parse_heap(&decoded[4..])
+    decoded.drain(..4);
+    Ok(decoded)
 }
 
-/// Walks heap scopes so only diagram-owned free labels and terminal objects
-/// contribute facts.
-fn parse_heap(bytes: &[u8]) -> io::Result<(Vec<Vec<u8>>, Vec<bool>)> {
+/// How a heap node relates to the scope stack.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Scope {
+    /// Opens a scope; following nodes are its children until its `Close`.
+    Open,
+    /// A field without children.
+    Leaf,
+    /// Closes the most recently opened scope.
+    Close,
+}
+
+/// Tokenizes a heap and validates its scope nesting, calling `visit` with the
+/// enclosing scopes, the node, its scope kind, and its content. For `Close`,
+/// the parents exclude the node being closed.
+fn walk_heap(
+    bytes: &[u8],
+    mut visit: impl FnMut(&[Node], Node, Scope, &[u8]) -> io::Result<()>,
+) -> io::Result<()> {
     let mut cursor = 0;
     let mut stack: Vec<Node> = Vec::new();
-    let mut bookmarks = Vec::new();
-    let mut terminal_icon_styles = Vec::new();
     while cursor < bytes.len() {
         let header = take(bytes, &mut cursor, 2)?;
         let size = header[0] >> 5;
@@ -97,7 +180,7 @@ fn parse_heap(bytes: &[u8]) -> io::Result<(Vec<Vec<u8>>, Vec<bool>)> {
                 let id = signed_variable(bytes, &mut cursor)?;
                 let value = signed_short_variable(bytes, &mut cursor)?;
                 if id == CLASS && class.replace(value).is_some() {
-                    return Err(invalid("duplicate BDHb class attribute"));
+                    return Err(invalid("duplicate heap class attribute"));
                 }
             }
         }
@@ -105,50 +188,189 @@ fn parse_heap(bytes: &[u8]) -> io::Result<(Vec<Vec<u8>>, Vec<bool>)> {
             0 | 7 => 0,
             1..=4 => size as usize,
             6 => unsigned_variable(bytes, &mut cursor)?,
-            _ => return Err(invalid("unsupported BDHb heap value size")),
+            _ => return Err(invalid("unsupported heap value size")),
         };
         let content = take(bytes, &mut cursor, length)?;
+        let node = Node { tag, class };
         match scope {
-            0 | 1 => {
-                if tag == TEXT && stack.len() >= 4 {
-                    let parents = &stack[stack.len() - 4..];
-                    if parents[0].class == Some(DIAGRAM)
-                        && matches!(parents[1].tag, NODE_LIST | Z_PLANE_LIST)
-                        && parents[2].tag == ARRAY_ELEMENT
-                        && parents[2].class == Some(LABEL)
-                        && parents[3].tag == TEXT_RECORD
-                        && parents[3].class == Some(TEXT_HAIR)
-                        && content.starts_with(b"#")
-                    {
-                        bookmarks.push(content.to_vec());
-                    }
-                }
-                if tag == OBJ_FLAGS
-                    && stack.last().is_some_and(|parent| {
-                        parent.tag == ARRAY_ELEMENT && parent.class == Some(FP_TERM)
-                    })
-                {
-                    terminal_icon_styles.push(object_flags(content)? & ICON_STYLE_FLAG != 0);
-                }
-                if scope == 0 {
-                    stack.push(Node { tag, class });
-                }
+            0 => {
+                visit(&stack, node, Scope::Open, content)?;
+                stack.push(node);
             }
+            1 => visit(&stack, node, Scope::Leaf, content)?,
             2 => {
                 let parent = stack
                     .pop()
-                    .ok_or_else(|| invalid("unmatched BDHb closing tag"))?;
+                    .ok_or_else(|| invalid("unmatched heap closing tag"))?;
                 if parent.tag != tag {
-                    return Err(invalid("mismatched BDHb closing tag"));
+                    return Err(invalid("mismatched heap closing tag"));
                 }
+                visit(&stack, parent, Scope::Close, &[])?;
             }
-            _ => return Err(invalid("unsupported BDHb heap scope")),
+            _ => return Err(invalid("unsupported heap scope")),
         }
     }
     if !stack.is_empty() {
-        return Err(invalid("unclosed BDHb heap scope"));
+        return Err(invalid("unclosed heap scope"));
     }
+    Ok(())
+}
+
+/// Walks heap scopes so only diagram-owned free labels and terminal objects
+/// contribute facts.
+fn parse_heap(bytes: &[u8]) -> io::Result<(Vec<Vec<u8>>, Vec<bool>)> {
+    let mut bookmarks = Vec::new();
+    let mut terminal_icon_styles = Vec::new();
+    walk_heap(bytes, |stack, node, scope, content| {
+        if scope == Scope::Close {
+            return Ok(());
+        }
+        if node.tag == TEXT && stack.len() >= 4 {
+            let parents = &stack[stack.len() - 4..];
+            if parents[0].class == Some(DIAGRAM)
+                && matches!(parents[1].tag, NODE_LIST | Z_PLANE_LIST)
+                && parents[2].tag == ARRAY_ELEMENT
+                && parents[2].class == Some(LABEL)
+                && parents[3].tag == TEXT_RECORD
+                && parents[3].class == Some(TEXT_HAIR)
+                && content.starts_with(b"#")
+            {
+                bookmarks.push(content.to_vec());
+            }
+        }
+        if node.tag == OBJ_FLAGS
+            && stack
+                .last()
+                .is_some_and(|parent| parent.tag == ARRAY_ELEMENT && parent.class == Some(FP_TERM))
+        {
+            terminal_icon_styles.push(object_flags(content)? & ICON_STYLE_FLAG != 0);
+        }
+        Ok(())
+    })?;
     Ok((bookmarks, terminal_icon_styles))
+}
+
+/// Collects direct defaults and name labels of front-panel controls.
+fn parse_front_panel(bytes: &[u8]) -> io::Result<Vec<ControlDefault>> {
+    struct LabelPart {
+        part_id: Option<u32>,
+        text: Option<Vec<u8>>,
+    }
+    struct OpenControl {
+        depth: usize,
+        type_id: Option<usize>,
+        data: Option<Vec<u8>>,
+        label: Option<Vec<u8>>,
+        label_part: Option<LabelPart>,
+    }
+    let mut open: Vec<OpenControl> = Vec::new();
+    let mut defaults = Vec::new();
+    walk_heap(bytes, |stack, node, scope, content| {
+        let is_control = node.tag == ARRAY_ELEMENT && node.class == Some(FP_DCO);
+        match scope {
+            Scope::Open if is_control => open.push(OpenControl {
+                depth: stack.len(),
+                type_id: None,
+                data: None,
+                label: None,
+                label_part: None,
+            }),
+            Scope::Close if is_control => {
+                let control = open
+                    .pop()
+                    .ok_or_else(|| invalid("unmatched FPHb control scope"))?;
+                if let Some(data) = control.data {
+                    let type_id = control
+                        .type_id
+                        .ok_or_else(|| invalid("FPHb control default has no typeDesc"))?;
+                    defaults.push(ControlDefault {
+                        type_id,
+                        label: control.label,
+                        data,
+                    });
+                }
+            }
+            Scope::Open | Scope::Close
+                if node.tag == ARRAY_ELEMENT && node.class == Some(LABEL) =>
+            {
+                if let Some(control) = open.last_mut() {
+                    let parents = &stack[control.depth..];
+                    if parents.len() == 3
+                        && parents[0].class == Some(FP_DCO)
+                        && parents[1].tag == DDO
+                        && parents[2].tag == PARTS_LIST
+                    {
+                        if scope == Scope::Open {
+                            control.label_part = Some(LabelPart {
+                                part_id: None,
+                                text: None,
+                            });
+                        } else if let Some(part) = control.label_part.take()
+                            && part.part_id == Some(NAME_LABEL)
+                            && let Some(text) = part.text
+                            && control.label.replace(text).is_some()
+                        {
+                            return Err(invalid("duplicate FPHb control name label"));
+                        }
+                    }
+                }
+            }
+            Scope::Open | Scope::Leaf => {
+                let Some(control) = open.last_mut() else {
+                    return Ok(());
+                };
+                let parents = &stack[control.depth..];
+                if parents.len() == 1 {
+                    if node.tag == TYPE_DESC && control.type_id.is_none() {
+                        control.type_id = Some(type_id(content)?);
+                    } else if node.tag == DEFAULT_DATA
+                        && control.data.replace(content.to_vec()).is_some()
+                    {
+                        return Err(invalid("duplicate FPHb control DefaultData"));
+                    }
+                } else if let Some(part) = control.label_part.as_mut() {
+                    if parents.len() == 4 && node.tag == PART_ID {
+                        if content.len() > 4 {
+                            return Err(invalid("oversized FPHb label partID"));
+                        }
+                        let mut bytes = [0; 4];
+                        bytes[4 - content.len()..].copy_from_slice(content);
+                        if part.part_id.replace(u32::from_be_bytes(bytes)).is_some() {
+                            return Err(invalid("duplicate FPHb label partID"));
+                        }
+                    } else if parents.len() == 5
+                        && parents[4].tag == TEXT_RECORD
+                        && parents[4].class == Some(TEXT_HAIR)
+                        && node.tag == TEXT
+                        && part.text.replace(content.to_vec()).is_some()
+                    {
+                        return Err(invalid("duplicate FPHb label text"));
+                    }
+                }
+            }
+            Scope::Close => {}
+        }
+        Ok(())
+    })?;
+    Ok(defaults)
+}
+
+/// Reads a heap TypeID field: a signed big-endian integer of 1 to 4 bytes that
+/// must be positive.
+fn type_id(content: &[u8]) -> io::Result<usize> {
+    if content.is_empty() || content.len() > 4 {
+        return Err(invalid("unsupported heap TypeID width"));
+    }
+    let mut bytes = if content[0] & 0x80 != 0 {
+        [0xff; 4]
+    } else {
+        [0; 4]
+    };
+    bytes[4 - content.len()..].copy_from_slice(content);
+    usize::try_from(i32::from_be_bytes(bytes))
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| invalid("heap TypeID must be positive"))
 }
 
 /// Reads a terminal's `objFlags` field as a big-endian unsigned integer.
@@ -187,7 +409,7 @@ fn unsigned_variable(bytes: &[u8], cursor: &mut usize) -> io::Result<usize> {
         254 => u32::from_be_bytes(take(bytes, cursor, 4)?.try_into().unwrap()),
         _ => first as u32,
     };
-    usize::try_from(value).map_err(|_| invalid("BDHb value is too large"))
+    usize::try_from(value).map_err(|_| invalid("heap value is too large"))
 }
 
 /// Reads LabVIEW's signed 1/2/4-byte attribute identifier.
@@ -318,5 +540,126 @@ mod tests {
         assert!(parse_heap(&[0x08, 24]).is_err());
         assert!(parse_heap(&[0x04, 24, 0x00]).is_err());
         assert!(parse_heap(&[0xa4, 24]).is_err());
+    }
+
+    fn control(heap: &mut Vec<u8>, type_id: &[u8], default: Option<&[u8]>, nested: &[u8]) {
+        node(heap, ARRAY_ELEMENT, 0, Some(FP_DCO as i16), &[]);
+        node(heap, TYPE_DESC, 1, None, type_id);
+        node(heap, 52, 0, None, &[]);
+        node(heap, TYPE_DESC, 1, None, &[0x63]);
+        node(heap, DEFAULT_DATA, 1, None, b"ddo-level, not the control");
+        heap.extend_from_slice(nested);
+        node(heap, 52, 2, None, &[]);
+        if let Some(default) = default {
+            node(heap, DEFAULT_DATA, 1, None, default);
+        }
+        node(heap, ARRAY_ELEMENT, 2, None, &[]);
+    }
+
+    #[test]
+    fn reads_direct_default_data_of_each_front_panel_control() {
+        let mut inner = Vec::new();
+        control(&mut inner, &[0x07], Some(b"\0\0\0\x02in"), &[]);
+        let mut heap = Vec::new();
+        node(&mut heap, 54, 0, None, &[]);
+        control(&mut heap, &[0x0a], Some(b"\0\0\0\x02pw"), &[]);
+        control(&mut heap, &[0x01], None, &[]);
+        control(&mut heap, &[0x01, 0x05], Some(b"\0\0\0\x03out"), &inner);
+        node(&mut heap, 54, 2, None, &[]);
+        assert_eq!(
+            parse_front_panel(&heap).unwrap(),
+            vec![
+                ControlDefault {
+                    type_id: 10,
+                    label: None,
+                    data: b"\0\0\0\x02pw".to_vec(),
+                },
+                ControlDefault {
+                    type_id: 7,
+                    label: None,
+                    data: b"\0\0\0\x02in".to_vec(),
+                },
+                ControlDefault {
+                    type_id: 261,
+                    label: None,
+                    data: b"\0\0\0\x03out".to_vec(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_only_each_controls_own_name_label() {
+        fn part(heap: &mut Vec<u8>, id: u8, text: &[u8]) {
+            node(heap, ARRAY_ELEMENT, 0, Some(LABEL as i16), &[]);
+            node(heap, TEXT_RECORD, 0, Some(TEXT_HAIR as i16), &[]);
+            node(heap, TEXT, 1, None, text);
+            node(heap, TEXT_RECORD, 2, None, &[]);
+            node(heap, PART_ID, 1, None, &[id]);
+            node(heap, ARRAY_ELEMENT, 2, None, &[]);
+        }
+        fn named_control(heap: &mut Vec<u8>, name: &[u8], nested: &[u8]) {
+            node(heap, ARRAY_ELEMENT, 0, Some(FP_DCO as i16), &[]);
+            node(heap, TYPE_DESC, 1, None, &[1]);
+            node(heap, DDO, 0, Some(81), &[]);
+            node(heap, PARTS_LIST, 0, None, &[]);
+            part(heap, 82, b"Password caption");
+            part(heap, NAME_LABEL as u8, name);
+            node(heap, PARTS_LIST, 2, None, &[]);
+            heap.extend_from_slice(nested);
+            node(heap, DDO, 2, None, &[]);
+            node(heap, DEFAULT_DATA, 1, None, b"value");
+            node(heap, ARRAY_ELEMENT, 2, None, &[]);
+        }
+        let mut nested = Vec::new();
+        named_control(&mut nested, b"Inner", &[]);
+        let mut heap = Vec::new();
+        named_control(&mut heap, b"Password", &nested);
+        named_control(&mut heap, b"Username", &[]);
+        let controls = parse_front_panel(&heap).unwrap();
+        assert_eq!(
+            controls
+                .iter()
+                .map(|c| c.label.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                Some(&b"Inner"[..]),
+                Some(&b"Password"[..]),
+                Some(&b"Username"[..])
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_control_name_labels() {
+        let mut heap = Vec::new();
+        node(&mut heap, ARRAY_ELEMENT, 0, Some(FP_DCO as i16), &[]);
+        node(&mut heap, DDO, 0, Some(81), &[]);
+        node(&mut heap, PARTS_LIST, 0, None, &[]);
+        for text in [b"First".as_slice(), b"Second".as_slice()] {
+            node(&mut heap, ARRAY_ELEMENT, 0, Some(LABEL as i16), &[]);
+            node(&mut heap, PART_ID, 1, None, &[NAME_LABEL as u8]);
+            node(&mut heap, TEXT_RECORD, 0, Some(TEXT_HAIR as i16), &[]);
+            node(&mut heap, TEXT, 1, None, text);
+            node(&mut heap, TEXT_RECORD, 2, None, &[]);
+            node(&mut heap, ARRAY_ELEMENT, 2, None, &[]);
+        }
+        node(&mut heap, PARTS_LIST, 2, None, &[]);
+        node(&mut heap, DDO, 2, None, &[]);
+        node(&mut heap, ARRAY_ELEMENT, 2, None, &[]);
+        assert!(parse_front_panel(&heap).is_err());
+    }
+
+    #[test]
+    fn rejects_defaults_without_a_valid_type_id() {
+        let mut heap = Vec::new();
+        node(&mut heap, ARRAY_ELEMENT, 0, Some(FP_DCO as i16), &[]);
+        node(&mut heap, DEFAULT_DATA, 1, None, b"value");
+        node(&mut heap, ARRAY_ELEMENT, 2, None, &[]);
+        assert!(parse_front_panel(&heap).is_err());
+        for content in [&[][..], &[0xff], &[0, 0, 0, 0, 1]] {
+            assert!(type_id(content).is_err(), "{content:?}");
+        }
+        assert_eq!(type_id(&[0x7f, 0xff]).unwrap(), 0x7fff);
     }
 }
