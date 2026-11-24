@@ -17,9 +17,9 @@ WireLint's original Rust RSRC reader was informed by the
 
 These were consulted as descriptions of the file format, including a locally
 vendored copy in labview-mcp, on 2026-11-17. No third-party implementation code,
-substantial text, or binary fixtures are copied into WireLint. Its committed
-RSRC test inputs are constructed synthetically. Existing external LabVIEW
-fixtures were also checked read-only during development.
+substantial text, or binary fixtures are copied into WireLint. Its RSRC test
+inputs include synthetic examples and project-created LabVIEW files. Existing
+external LabVIEW fixtures were also checked read-only during development.
 
 The VI description reader also uses pylabview's description of `STRG` resource
 sections and LabVIEW string layouts in `LVblock.py` and `LVmisc.py`.
@@ -58,6 +58,9 @@ pylabview's [`LVlinkinfo.py`](https://github.com/mefistotelis/pylabview/blob/mas
 and [`linkobjs.py`](https://github.com/labview-package-manager/lvpm/blob/master/tools/linkfix/linkobjs.py)
 (`LIvi` linker sections and bounded `PTH0` paths). These sources were
 consulted as format descriptions; no implementation code was copied.
+The library member URL interpretation was also checked against labview-mcp's
+offline file reader and its saved-library fixtures. Those references were
+consulted read-only; the test VI is a user-created sandbox VI.
 
 Block-diagram bookmark extraction was informed by pylabview's `HeapVerb` in
 [`LVblock.py`](https://github.com/mefistotelis/pylabview/blob/master/pylabview/LVblock.py),

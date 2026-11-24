@@ -363,9 +363,10 @@ to VI and VI-template files (`.vi`, `.vit`, `.vim`), not controls.
 WireLint reads the VI's `VILB` entry in its `LIvi` linker table and compares its
 relative `PTH0` owner path with the `.lvlib` files discovered in the same scan.
 It then checks the library's `Item Type="VI"` URLs, including items nested in
-folders. A VI is reported only when its referenced library is also scanned and
-does not list that VI. External, absolute/token, and unscanned library paths
-cannot be checked and are skipped.
+folders. These URLs are relative to the library file: `../Member.vi` names a
+VI beside that file. A VI is reported only when its referenced library is also
+scanned and does not list that VI. External, absolute/token, and unscanned
+library paths cannot be checked and are skipped.
 
 ```yaml
 rules:

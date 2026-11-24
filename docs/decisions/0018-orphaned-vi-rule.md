@@ -37,6 +37,15 @@ result.
 The rule requires a scan-wide relationship pass after each discovered file is
 parsed. It does not modify VI or library files.
 
+## Amendment (2026-11-24): resolve member URLs against the library file
+
+LabVIEW library member URLs are relative to the library file itself, not its
+directory: `../Member.vi` names a sibling VI. Resolve these URLs against the
+library path before enforcing the scan-root boundary. The former
+directory-relative interpretation produced false orphan findings for listed
+members. Using the directory for URLs without `..` as a fallback would
+misinterpret paths and could hide real orphans, so no fallback is used.
+
 ## References
 
 - [Rule architecture](0006-rule-runner-and-source-only-check.md)

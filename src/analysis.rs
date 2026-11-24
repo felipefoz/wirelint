@@ -165,10 +165,9 @@ fn apply_orphaned_vi_facts(files: &mut [(PathBuf, formats::FileFacts, Vec<Vec<u8
         let Some(members) = facts.library_members.as_ref() else {
             continue;
         };
-        let base = library_path.parent().unwrap_or_else(|| Path::new(""));
         let resolved_members = members
             .iter()
-            .filter_map(|member| resolve_scanned_path(base, member))
+            .filter_map(|member| resolve_scanned_path(library_path, member))
             .collect();
         library_members.insert(library_path.clone(), resolved_members);
     }
@@ -237,6 +236,21 @@ mod tests {
 
     #[test]
     fn normalizes_relative_urls_and_rejects_paths_outside_the_scan_root() {
+        assert_eq!(
+            resolve_scanned_path(Path::new("owner.lvlib"), "../member.vi"),
+            Some(PathBuf::from("member.vi"))
+        );
+        assert_eq!(
+            resolve_scanned_path(
+                Path::new("nested").join("owner.lvlib").as_path(),
+                r"..\Sub\member.vi"
+            ),
+            Some(PathBuf::from("nested").join("Sub").join("member.vi"))
+        );
+        assert_eq!(
+            resolve_scanned_path(Path::new("owner.lvlib"), "../../outside.vi"),
+            None
+        );
         assert_eq!(
             resolve_scanned_path(Path::new("nested"), r"..\library\owner.lvlib"),
             Some(PathBuf::from("library").join("owner.lvlib"))

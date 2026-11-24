@@ -968,7 +968,7 @@ fn orphaned_vi_rule_flags_only_a_scanned_library_that_omits_the_vi() {
     );
     listed.write(
         "orphaned-example.lvlib",
-        r#"<Library><Item Name="orphan-vi.vi" Type="VI" URL="orphan-vi.vi"/></Library>"#,
+        r#"<Library><Item Name="orphan-vi.vi" Type="VI" URL="../orphan-vi.vi"/></Library>"#,
     );
     let config = listed.write("checks.yaml", rule_config);
     let output = listed.configured_scan(&config, &["--verbose"]);
@@ -977,6 +977,121 @@ fn orphaned_vi_rule_flags_only_a_scanned_library_that_omits_the_vi() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Analyzed 2 file(s); 0 finding(s); 0 analysis error(s)."));
     assert!(!stdout.contains("[orphaned-vi]"));
+}
+
+#[test]
+fn labview_library_member_urls_are_relative_to_the_library_file() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("quality")
+        .join("examples");
+    let directory = TestDirectory::new();
+    directory.write(
+        "orphan-vi.vi",
+        fs::read(fixtures.join("orphan-vi.vi")).unwrap(),
+    );
+    let library = fs::read_to_string(fixtures.join("orphaned-example.lvlib")).unwrap();
+    let item = r#"<Item Name="orphan-vi.vi" Type="VI" URL="../orphan-vi.vi"/>"#;
+    assert!(library.contains("</Library>"));
+    let listed = library.replace("</Library>", &format!("{item}\n</Library>"));
+    directory.write("orphaned-example.lvlib", listed);
+    let output = directory.scan(&["--verbose"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}");
+    assert!(!stdout.contains("[orphaned-vi]"), "{stdout}");
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+
+    directory.write("orphaned-example.lvlib", library);
+    let output = directory.scan(&["--verbose"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{stdout}");
+    assert!(
+        stdout.contains("orphan-vi.vi: error [orphaned-vi]"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn global_and_polymorphic_fixtures_are_read_without_a_configured_pane_rule() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("quality")
+        .join("examples");
+    let directory = TestDirectory::new();
+    for file in ["global.vi", "poly.vi"] {
+        directory.write(file, fs::read(fixtures.join(file)).unwrap());
+    }
+    let output = directory.scan(&[]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}");
+    assert!(stdout.contains("Analyzed 2 file(s)"), "{stdout}");
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+}
+
+#[test]
+fn owner_fixtures_are_read_without_labview() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("quality");
+    for folder in ["class-neutral", "control-neutral"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+            .arg("scan")
+            .arg(fixtures.join(folder))
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{folder}: {stdout}");
+        assert!(stdout.contains("Analyzed 2 file(s)"), "{folder}: {stdout}");
+        assert!(stdout.contains("0 analysis error(s)"), "{folder}: {stdout}");
+    }
+}
+
+#[test]
+fn example_fixtures_cover_bookmarks_and_terminal_styles() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("quality")
+        .join("examples");
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("scan")
+        .arg(&fixtures)
+        .arg("--verbose")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{stdout}");
+    assert!(stdout.contains("Analyzed 11 file(s)"), "{stdout}");
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+    assert!(
+        stdout.contains("bookmark.vi: skipped [file-description]"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("orphan-vi.vi: error [orphaned-vi]"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("class1.lvclass: warning [class-mutation-history]"),
+        "{stdout}"
+    );
+    for (name, count) in [("icons-style.vi", 1), ("icons-style-2.vi", 2)] {
+        assert!(
+            stdout.contains(&format!(
+                "{name}: warning [terminal-style]: This VI has {count} terminal(s)"
+            )),
+            "{stdout}"
+        );
+    }
+    for name in ["data-style.vi", "data-style-2.vi"] {
+        assert!(
+            !stdout.contains(&format!("{name}: warning [terminal-style]")),
+            "{stdout}"
+        );
+    }
 }
 
 #[test]
