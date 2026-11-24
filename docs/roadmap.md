@@ -50,11 +50,8 @@ decisions are omitted.
   injection or insecure deserialization where the tainted source and the sink
   are in different VIs. Needs Tier 2a plus per-subVI input/output tainting.
   See [decision 0026](decisions/0026-security-analysis-command-and-rules.md).
-- **GitLab Security Report Schema exact field layout:** decision 0026 commits
-  to a `sast`-artifact report format and a severity mapping, but defers the
-  precise JSON shape (schema version, `location`, `identifiers`) to a
-  follow-up decision once implemented, the way decision 0011 followed
-  decision 0004.
+- **GitLab Security Report Schema:** the `gitlab-sast` report format is
+  implemented in [decision 0032](decisions/0032-gitlab-sast-report.md).
 
 ## Releases
 

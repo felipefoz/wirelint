@@ -78,7 +78,7 @@ The scan options can be combined in one invocation. This example loads
 and writes a GitLab code quality report:
 
 ```text
-wirelint scan . --config checks.yaml --fail-on warning --verbose --format gitlab --output gl-code-quality-report.json
+wirelint scan . --config checks.yaml --fail-on warning --verbose --format gitlab-code-quality --output gl-code-quality-report.json
 ```
 
 `--format` and `--output` must be used together. See [CI report files](#ci-report-files)
@@ -150,7 +150,8 @@ not analysis errors.
 ## CI report files
 
 ```text
-wirelint scan . --format gitlab --output gl-code-quality-report.json
+wirelint scan . --format gitlab-code-quality --output gl-code-quality-report.json
+wirelint sast . --format gitlab-sast --output gl-sast-report.json
 wirelint scan . --format sarif --output wirelint.sarif
 ```
 
@@ -159,6 +160,9 @@ UTF-8 JSON report without a byte order mark. The terminal summary, `--verbose`,
 and exit thresholds are unchanged. Existing report files are overwritten; the
 parent directory must already exist. Destinations resolving to discovered input
 files or the loaded configuration are rejected.
+
+The GitLab Code Quality format is named `gitlab-code-quality`. The shorter
+`gitlab` name remains accepted as an alias for existing scripts.
 
 Reports include all findings regardless of the failure threshold. Empty scans
 and disabled rules produce empty findings. Reports are written after completed
@@ -173,24 +177,31 @@ Non-UTF-8 finding paths are rejected rather than changed to lossy names.
 
 LabVIEW VIs do not have source lines. GitLab requires a positive line number,
 so `location.lines.begin` is always **1**, a file-level placeholder, not a
-diagram position. SARIF uses file-only locations without a line/region.
-Neither format provides diagram navigation; inline PR/MR annotations may not
-appear for binary files.
+diagram position. GitLab SAST and SARIF use file-only locations without a
+line/region. None of these formats provides diagram navigation; inline PR/MR
+annotations may not appear for binary files.
 
-| WireLint severity | GitLab | SARIF |
-| --- | --- | --- |
-| `info` | `info` | `note` |
-| `warning` | `minor` | `warning` |
-| `error` | `major` | `error` |
+| WireLint severity | GitLab Code Quality | GitLab SAST | SARIF |
+| --- | --- | --- | --- |
+| `info` | `info` | `Info` | `note` |
+| `warning` | `minor` | `Medium` | `warning` |
+| `error` | `major` | `High` | `error` |
+
+The `gitlab-sast` format writes the GitLab Security Report Schema with
+`scan.type: sast`, CWE identifiers, stable finding IDs, and file-level
+locations. It maps severities to `Info`, `Medium`, and `High`, respectively.
+Unlike Code Quality, the SAST report also records analysis errors as fatal
+scan messages and marks the scan as failed.
 
 Fingerprints identify the relative file path and rule. They remain stable
 across message/severity changes and different checkout locations; moving a
 file changes its fingerprint.
 
-Analysis errors remain on stderr and force status `2`. SARIF also records them
-as failed invocation notifications, separate from findings. GitLab's report
-format has no analysis-error channel: **check the process status**, since an
-empty GitLab report can accompany a failed/incomplete scan.
+Analysis errors remain on stderr and force status `2`. SARIF records them as
+failed invocation notifications, and GitLab SAST records them as fatal scan
+messages, separate from findings. GitLab Code Quality has no analysis-error
+channel: **check the process status**, since an empty Code Quality report can
+accompany a failed/incomplete scan.
 
 See [CI integration](ci-reports.md) for GitLab and GitHub upload examples.
 

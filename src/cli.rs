@@ -7,12 +7,12 @@ use crate::rules::quality::BUILT_INS as QUALITY_BUILT_INS;
 use crate::rules::sast::BUILT_INS as SAST_BUILT_INS;
 use crate::rules::{Rule, Severity};
 use crate::scan;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -47,14 +47,14 @@ enum Command {
         verbose: bool,
         /// CI report format; requires --output. Terminal output is unchanged.
         #[arg(long, value_enum, requires = "output")]
-        format: Option<Format>,
+        format: Option<ScanFormat>,
         /// Write the CI report to FILE (overwrite); requires --format. Parent must exist.
         #[arg(long, value_name = "FILE", requires = "format")]
         output: Option<PathBuf>,
     },
     /// Discover LabVIEW files and run enabled security analysis rules.
     #[command(
-        long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults and scalar block-diagram string constants for credentials (credential-named controls and constants, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. Tier 1 checks read facts already stored in the file; none of them trace data flow, so a finding means 'needs review', not 'confirmed exploitable'. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
+        long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults and scalar block-diagram string constants for credentials (credential-named controls and constants, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. Tier 1 checks read facts already stored in the file; none of them trace data flow, so a finding means 'needs review', not 'confirmed exploitable'. Use --format gitlab-sast to write a GitLab Security Report Schema report for artifacts:reports:sast. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
     )]
     Sast {
         /// Folder to scan.
@@ -78,6 +78,24 @@ enum Command {
     },
     /// List built-in rule IDs, descriptions, and default severities.
     Rules,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ScanFormat {
+    /// GitLab Code Quality JSON; line 1 is a file-level placeholder.
+    #[value(name = "gitlab-code-quality", alias = "gitlab")]
+    Gitlab,
+    /// SARIF 2.1.0 for GitHub code scanning, with file-only locations.
+    Sarif,
+}
+
+impl From<ScanFormat> for Format {
+    fn from(format: ScanFormat) -> Self {
+        match format {
+            ScanFormat::Gitlab => Self::Gitlab,
+            ScanFormat::Sarif => Self::Sarif,
+        }
+    }
 }
 
 /// Executes the command and returns the process status, propagating I/O errors.
@@ -115,7 +133,7 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             config,
             fail_on,
             verbose,
-            format,
+            format.map(Format::from),
             destination,
             "scan (quality)",
             QUALITY_BUILT_INS,
@@ -166,6 +184,7 @@ fn run_rules(
         .unwrap_or_default();
     let fail_on = fail_on.unwrap_or(config.fail_on);
     let started = Instant::now();
+    let wall_clock_started = SystemTime::now();
     let files = scan::discover_files(&folder, &config.exclude_folders)?;
     if files.is_empty() {
         writeln!(output, "No supported LabVIEW files found.")?;
@@ -179,6 +198,7 @@ fn run_rules(
     writeln!(output, "Scan type: {scan_type}")?;
     output.flush()?;
     let report = analysis::analyze(&folder, &files, &config, rules);
+    let wall_clock_finished = SystemTime::now();
     let elapsed = started.elapsed();
     if verbose {
         for finding in &report.findings {
@@ -211,7 +231,15 @@ fn run_rules(
     write_summary(&report, elapsed, output)?;
     if let (Some(format), Some(destination)) = (format, destination) {
         check_destination(&destination, &folder, &files, config_path.as_deref())?;
-        let bytes = reports::render(&report, format, rules)?;
+        let bytes = reports::render(
+            &report,
+            format,
+            rules,
+            reports::ScanTimes {
+                started_at: wall_clock_started,
+                finished_at: wall_clock_finished,
+            },
+        )?;
         fs::write(&destination, bytes).map_err(|error| {
             io::Error::new(
                 error.kind(),
@@ -346,6 +374,25 @@ mod tests {
     }
 
     #[test]
+    fn accepts_canonical_and_legacy_gitlab_code_quality_names() {
+        for format in ["gitlab-code-quality", "gitlab"] {
+            assert!(
+                Cli::try_parse_from([
+                    "wirelint",
+                    "scan",
+                    ".",
+                    "--format",
+                    format,
+                    "--output",
+                    "report.json"
+                ])
+                .is_ok(),
+                "{format}"
+            );
+        }
+    }
+
+    #[test]
     fn help_describes_rules_and_exit_behavior() {
         let mut command = Cli::command();
         let help = command
@@ -381,12 +428,15 @@ mod tests {
             "--format",
             "--output",
             "gitlab",
+            "gitlab-code-quality",
             "sarif",
             "line 1",
             "file-only",
         ] {
             assert!(help.contains(expected), "{expected}: {help}");
         }
+        assert!(help.contains("gitlab"), "{help}");
+        assert!(!help.contains("gitlab-sast"), "{help}");
         let help = command
             .find_subcommand_mut("sast")
             .unwrap()
@@ -394,6 +444,7 @@ mod tests {
             .to_string();
         assert!(help.contains("Print the scan type on stdout"), "{help}");
         assert!(help.contains("block-diagram string constants"), "{help}");
+        assert!(help.contains("gitlab-sast"), "{help}");
     }
 
     #[test]

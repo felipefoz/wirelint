@@ -397,7 +397,7 @@ fn xml_description_directives_skip_only_owner_rules_in_both_output_modes() {
             "--fail-on",
             "warning",
             "--format",
-            "gitlab",
+            "gitlab-code-quality",
             "--output",
             destination.to_str().unwrap(),
         ];
@@ -1179,6 +1179,66 @@ fn sast_reports_control_defaults_in_separated_and_embedded_vis() {
 }
 
 #[test]
+fn sast_writes_a_gitlab_security_report() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sast");
+    let directory = TestDirectory::new();
+    let destination = directory.0.join("gl-sast-report.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&fixtures)
+        .args(["--format", "gitlab-sast", "--output"])
+        .arg(&destination)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(destination).unwrap()).unwrap();
+    assert_eq!(report["scan"]["type"], "sast");
+    assert_eq!(report["scan"]["status"], "success");
+    let vulnerabilities = report["vulnerabilities"].as_array().unwrap();
+    assert!(!vulnerabilities.is_empty());
+    for vulnerability in vulnerabilities {
+        assert_eq!(vulnerability["severity"], "Medium");
+        assert!(vulnerability["location"]["file"].is_string());
+        assert_eq!(vulnerability["id"].as_str().unwrap().len(), 64);
+        assert!(
+            vulnerability["identifiers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|identifier| identifier["type"] == "cwe")
+        );
+    }
+    let serialized = serde_json::to_string(&report).unwrap();
+    for secret in ["WLMARK", "Sup3rS3cret", "hunter22"] {
+        assert!(!serialized.contains(secret), "{serialized}");
+    }
+}
+
+#[test]
+fn gitlab_sast_report_is_rejected_by_scan() {
+    let directory = TestDirectory::new();
+    let destination = directory.0.join("gl-sast-report.json");
+    let output = directory.scan(&[
+        "--format",
+        "gitlab-sast",
+        "--output",
+        destination.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("gitlab-sast"), "{error}");
+    assert!(error.contains("possible values:"), "{error}");
+    assert!(error.contains("gitlab-code-quality"), "{error}");
+    assert!(!destination.exists());
+}
+
+#[test]
 fn lists_rules_and_handles_an_empty_folder() {
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
         .arg("rules")
@@ -1374,9 +1434,9 @@ fn ci_reports_preserve_terminal_output_thresholds_and_stable_fingerprints() {
     let destination_arg = destination.to_str().unwrap();
     let baseline = directory.configured_scan(&config, &["--verbose"]);
     for (format, threshold, status) in [
-        ("gitlab", "error", 1),
+        ("gitlab-code-quality", "error", 1),
         ("sarif", "error", 1),
-        ("gitlab", "none", 0),
+        ("gitlab-code-quality", "none", 0),
         ("sarif", "none", 0),
     ] {
         let output = directory.configured_scan(
@@ -1400,7 +1460,7 @@ fn ci_reports_preserve_terminal_output_thresholds_and_stable_fingerprints() {
         let bytes = fs::read(&destination).unwrap();
         assert!(!bytes.starts_with(&[0xEF, 0xBB, 0xBF]));
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        if format == "gitlab" {
+        if format == "gitlab-code-quality" {
             assert_eq!(json.as_array().unwrap().len(), 1);
             assert_eq!(json[0]["location"]["path"], "nested/example #.vi");
             assert_eq!(json[0]["location"]["lines"]["begin"], 1);
@@ -1428,7 +1488,7 @@ fn ci_reports_preserve_terminal_output_thresholds_and_stable_fingerprints() {
 fn ci_reports_cover_empty_scans_disabled_rules_and_partial_analysis_failures() {
     let directory = TestDirectory::new();
     let destination = directory.0.join("report.json");
-    for format in ["gitlab", "sarif"] {
+    for format in ["gitlab-code-quality", "sarif"] {
         let args = [
             "--format",
             format,
@@ -1439,7 +1499,7 @@ fn ci_reports_cover_empty_scans_disabled_rules_and_partial_analysis_failures() {
         assert_eq!(output.status.code(), Some(0));
         let empty: serde_json::Value =
             serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
-        if format == "gitlab" {
+        if format == "gitlab-code-quality" {
             assert_eq!(empty, serde_json::json!([]));
         } else {
             assert_eq!(empty["runs"][0]["results"], serde_json::json!([]));
@@ -1454,7 +1514,7 @@ fn ci_reports_cover_empty_scans_disabled_rules_and_partial_analysis_failures() {
         "finding.lvproj",
         r#"<Project LVVersion="20008000"><Property Name="NI.Project.Description" Type="Str">Description</Property></Project>"#,
     );
-    for format in ["gitlab", "sarif"] {
+    for format in ["gitlab-code-quality", "sarif"] {
         let output = directory.scan(&[
             "--format",
             format,
@@ -1471,7 +1531,7 @@ fn ci_reports_cover_empty_scans_disabled_rules_and_partial_analysis_failures() {
         );
         let json: serde_json::Value =
             serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
-        if format == "gitlab" {
+        if format == "gitlab-code-quality" {
             assert_eq!(json.as_array().unwrap().len(), 1);
             assert_eq!(json[0]["location"]["path"], "finding.lvproj");
         } else {
@@ -1513,7 +1573,7 @@ fn ci_reports_cover_empty_scans_disabled_rules_and_partial_analysis_failures() {
 fn ci_report_options_and_write_errors_fail_explicitly() {
     let directory = TestDirectory::new();
     for args in [
-        vec!["--format", "gitlab"],
+        vec!["--format", "gitlab-code-quality"],
         vec!["--output", "report.json"],
         vec!["--format", "unknown", "--output", "report.json"],
     ] {
@@ -1528,7 +1588,7 @@ fn ci_report_options_and_write_errors_fail_explicitly() {
     ] {
         let output = directory.scan(&[
             "--format",
-            "gitlab",
+            "gitlab-code-quality",
             "--output",
             destination.to_str().unwrap(),
         ]);
@@ -1550,7 +1610,12 @@ fn ci_reports_cannot_overwrite_discovered_sources_or_configuration() {
         let original = fs::read(path).unwrap();
         let output = directory.configured_scan(
             &config,
-            &["--format", "gitlab", "--output", path.to_str().unwrap()],
+            &[
+                "--format",
+                "gitlab-code-quality",
+                "--output",
+                path.to_str().unwrap(),
+            ],
         );
         assert_eq!(output.status.code(), Some(2));
         assert!(

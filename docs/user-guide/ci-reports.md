@@ -1,9 +1,10 @@
 # CI code quality reports
 
-WireLint exports GitLab Code Quality JSON and SARIF 2.1.0 for GitHub code
-scanning. Run it from the checkout root and scan `.` so reported paths match
-repository paths. See the [CLI guide](cli.md#ci-report-files) for locations,
-severity mapping, fingerprints, and error behavior.
+WireLint exports GitLab Code Quality JSON, GitLab SAST reports, and SARIF
+2.1.0 for GitHub code scanning. Run it from the checkout root and scan `.` so
+reported paths match repository paths. See the
+[CLI guide](cli.md#ci-report-files) for locations, severity mapping,
+fingerprints, and error behavior.
 
 These examples assume `wirelint` is already built or installed on the runner.
 They do not require LabVIEW. Choose `--fail-on warning` to fail on warnings
@@ -16,7 +17,7 @@ Add a job to your pipeline:
 ```yaml
 wirelint:
   script:
-    - wirelint scan . --format gitlab --output gl-code-quality-report.json --fail-on warning
+    - wirelint scan . --format gitlab-code-quality --output gl-code-quality-report.json --fail-on warning
   artifacts:
     when: always
     reports:
@@ -32,6 +33,31 @@ compare findings against a baseline.
 
 GitLab requires line numbers. WireLint uses line 1 as a file-level placeholder;
 it does not identify a location inside a LabVIEW diagram.
+
+## GitLab SAST
+
+Use the separate security-analysis command and declare the generated file as
+a SAST artifact:
+
+```yaml
+wirelint_sast:
+  script:
+    - wirelint sast . --format gitlab-sast --output gl-sast-report.json
+  artifacts:
+    when: always
+    reports:
+      sast: gl-sast-report.json
+    paths:
+      - gl-sast-report.json
+```
+
+By default, warning findings do not fail the job, so the report can be
+ingested while still surfacing findings. If the job fails, GitLab may retain
+the artifact without ingesting it as a security report. Analysis errors are
+recorded as fatal scan messages; they also produce process status `2`.
+Vulnerability locations identify files only because WireLint does not parse
+LabVIEW diagram source lines. CWE identifiers are included for rules that map
+to a CWE.
 
 ## GitHub
 
@@ -72,4 +98,5 @@ not additional rule violations.
 ## References
 
 - [GitLab Code Quality](https://docs.gitlab.com/ci/testing/code_quality/)
+- [GitLab security scanner integration](https://docs.gitlab.com/development/integrations/secure/)
 - [Uploading SARIF to GitHub](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)

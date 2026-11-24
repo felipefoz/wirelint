@@ -91,16 +91,16 @@ excluded entirely rather than deferred to Tier 2.
     rules, false-positive handling, tests) when implemented, matching the
     existing one-rule-per-decision convention (0012-0024).
 - Add a third `reports::Format` variant for GitLab's Security Report Schema
-  (`sast` artifact type), alongside the existing `gitlab` (Code Quality) and
-  `sarif` formats; available to both `scan` and `sast` since both only
-  produce a `Report`. Map WireLint's three severities onto GitLab's wider
-  scale as Info to Info, Warning to Medium, Error to High, leaving
-  Low/Unknown/Critical unused until a concrete need arises. Reuse the
-  SHA-256(rule ID, NUL, path) fingerprint model from decision 0011 for the
-  report's vulnerability `id`. Confirm the exact JSON field layout (schema
-  version, `location`, `identifiers`) against GitLab's current published
-  schema in a follow-up decision once implemented, the same way decision
-  0011 followed decision 0004.
+  (`sast` artifact type), alongside the existing `gitlab-code-quality` and
+  `sarif` formats, and make it available only to `sast` so quality-rule
+  findings cannot be mislabeled as security findings. Map WireLint's three
+  severities onto GitLab's wider scale as Info to Info, Warning to Medium,
+  Error to High, leaving Low/Unknown/Critical unused until a concrete need
+  arises. Reuse the SHA-256(rule ID, NUL, path) fingerprint model from
+  decision 0011 for the report's vulnerability `id`. Confirm the exact JSON
+  field layout (schema version, `location`, `identifiers`) against GitLab's
+  current published schema in a follow-up decision once implemented, the same
+  way decision 0011 followed decision 0004.
 - Represent CWE in SARIF with `external/cwe/cwe-NNN` tags in each rule's
   `properties.tags` (the convention CodeQL, Semgrep, and Bandit already use
   for GitHub code scanning's CWE filtering), not full SARIF
@@ -122,6 +122,15 @@ excluded entirely rather than deferred to Tier 2.
     `sensitive-dependency` reads, plus per-subVI input/output tainting.
   Record both in `docs/roadmap.md` as needing their own decision once a
   node/wire graph model exists; Tier 2b additionally needs Tier 2a.
+
+### Amendment (2026-11-24): restrict the SAST report to `sast`
+
+The initial implementation exposed `gitlab-sast` to both commands because
+they share a `Report` type. A report produced by `wirelint scan` then labeled
+quality findings as SAST vulnerabilities, which is misleading to GitLab
+consumers. Restrict `gitlab-sast` to `wirelint sast`; `scan` continues to
+support GitLab Code Quality and SARIF. This supersedes the earlier availability
+choice above.
 
 ## Alternatives
 

@@ -12,9 +12,11 @@ without changing terminal summaries or failure thresholds.
 
 ## Decisions
 
-- Add paired `--format gitlab|sarif` and `--output FILE` options to `scan`.
-  Both are required together. Write one report per invocation while preserving
-  terminal output, verbosity, and exit statuses. Keep these options out of YAML.
+- Add paired `--format gitlab-code-quality|sarif` and `--output FILE` options
+  to `scan`. Both are required together. Write one report per invocation while
+  preserving terminal output, verbosity, and exit statuses. Keep these options
+  out of YAML. Accept `gitlab` as a compatibility alias for
+  `gitlab-code-quality`.
 - Paths are relative to the scan root, with `/` separators. CI must scan the
   repository root. Reject non-UTF-8 finding paths rather than replacing bytes
   and potentially identifying the wrong file. SARIF paths are percent-encoded
@@ -43,6 +45,12 @@ without changing terminal summaries or failure thresholds.
 - Use `serde_json` for correct JSON escaping and `sha2` for stable SHA-256,
   rather than hand-written JSON, an unstable standard-library hasher, or a
   homegrown hash implementation. No platform SDK or upload dependency is needed.
+
+### Amendment (2026-11-24): descriptive GitLab format name
+
+Use `gitlab-code-quality` as the canonical name to distinguish this report
+from GitLab's separate `gitlab-sast` report. Retain `gitlab` as an alias so
+existing scripts continue to work.
 
 ## Alternatives and consequences
 
