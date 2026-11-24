@@ -33,3 +33,9 @@ The password-protected VI uses the fixture-only password
 The separate-compiled-code folder contains a LabVIEW-saved VI and a synthetic
 XML library. They exercise the VI save-record flag and the library's
 `NI.LV.All.SourceOnly` property respectively.
+
+The auto-error-handling folder contains an enabled standard VI and genuine
+global and polymorphic negative fixtures. The latter two have their saved flag
+clear: LabVIEW rejects enabling it through VI Server with error 1035. Synthetic
+reader tests cover both flag states for these kinds. Only the standard VI
+should produce an auto-error-handling finding.

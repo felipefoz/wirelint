@@ -309,11 +309,14 @@ Example.vi: error [no-breakpoints]: Remove all block diagram breakpoints before 
 
 Disallows automatic error handling on VIs and VI templates (`.vi`, `.vit`,
 `.vim`). It is enabled by default with `error` severity, so an enabled setting
-fails the default CI threshold. Controls and XML project, library, and class
-files have no applicable VI execution setting and are skipped.
+fails the default CI threshold. Global and polymorphic VIs have no executable
+diagram of their own and are skipped, even when the saved flag is enabled.
+Controls and XML project, library, and class files are also skipped.
 
 The rule reads bit 29 (`0x20000000`) of the LVSR `viFlags2` word at payload
-offset 8. This is the saved **Enable automatic error handling** setting in VI
+offset 8. The big-endian `viType` field at LVSR payload offset 34 identifies
+global (`4`) and polymorphic (`11`) VIs. Other VI types retain the flag check.
+This is the saved **Enable automatic error handling** setting in VI
 Properties > Execution. Disable that setting in LabVIEW and save the VI to
 resolve a finding. WireLint does not change the setting.
 

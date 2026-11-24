@@ -7,6 +7,9 @@ use super::{FileFacts, Version, invalid};
 use std::io;
 use std::path::PathBuf;
 
+const GLOBAL_VI_TYPE: u16 = 4;
+const POLYMORPHIC_VI_TYPE: u16 = 11;
+
 #[cfg(test)]
 pub(super) fn read_facts(
     bytes: &[u8],
@@ -171,7 +174,9 @@ pub(super) fn read_facts_with_orphaned_vi(
                 let instrument_state = number(payload, 24)?;
                 debugging_enabled = Some(instrument_state & (1 << 9) != 0);
                 has_breakpoints = Some(instrument_state & 0x2000_0000 != 0);
-                auto_error_handling = Some(vi_flags2 & 0x2000_0000 != 0);
+                let vi_type = u16::from_be_bytes([payload[34], payload[35]]);
+                auto_error_handling = (!matches!(vi_type, GLOBAL_VI_TYPE | POLYMORPHIC_VI_TYPE))
+                    .then_some(vi_flags2 & 0x2000_0000 != 0);
             }
             if read_version || read_description || read_default_strings {
                 let word = u32::from_be_bytes(payload[0..4].try_into().unwrap());
@@ -1000,6 +1005,23 @@ mod tests {
                         .auto_error_handling,
                     matches!(kind, b"LVIN" | b"sVIN").then_some(expected),
                     "{kind:?}, {flags:#x}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn skips_auto_error_handling_for_global_and_polymorphic_vi_types() {
+        for vi_type in [0_u16, 1, 2, 4, 11, 12] {
+            for enabled in [false, true] {
+                let mut bytes = fixture(if enabled { 0x2000_0000 } else { 0 });
+                bytes[36 + 34..36 + 36].copy_from_slice(&vi_type.to_be_bytes());
+                assert_eq!(
+                    read_facts(&bytes, false, false)
+                        .unwrap()
+                        .auto_error_handling,
+                    (!matches!(vi_type, 4 | 11)).then_some(enabled),
+                    "VI type {vi_type}, enabled {enabled}"
                 );
             }
         }

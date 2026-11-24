@@ -723,6 +723,36 @@ fn automatic_error_handling_fails_only_for_vi_files_with_the_flag_set() {
 }
 
 #[test]
+fn automatic_error_handling_skips_global_and_polymorphic_fixtures() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("quality")
+        .join("auto-error-handling");
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("scan")
+        .arg(&fixtures)
+        .arg("--verbose")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stdout}\n{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+    assert!(stdout.contains("Analyzed 3 file(s)"), "{stdout}");
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+    assert!(
+        stdout.contains("enabled.vi: error [auto-error-handling]"),
+        "{stdout}"
+    );
+    assert_eq!(
+        stdout.matches(": error [auto-error-handling]").count(),
+        1,
+        "{stdout}"
+    );
+}
+
+#[test]
 fn scans_xml_and_applies_yaml_severity_and_cli_threshold() {
     let directory = TestDirectory::new();
     directory.write(

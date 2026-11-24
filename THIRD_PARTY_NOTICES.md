@@ -50,6 +50,11 @@ The `auto-error-handling` rule uses pylavi's
 [`TypeLVSR.AUTO_ERROR_HANDLING`](https://github.com/marcpage/pylavi/blob/main/pylavi/resource_types.py)
 interpretation (viFlags2 word 1, mask `0x20000000`), which identifies the
 saved automatic error handling setting. No implementation code was copied.
+Its applicability check uses pylabview's `LVinstrument.py` definitions of
+`LVSRData.viType` (big-endian 16-bit field at offset 34), `VI_TYPE.Global`
+(`4`), and `VI_TYPE.Polymorph` (`11`). labview-mcp's offline evaluation
+reported that these non-executable VI kinds can carry the flag. These sources
+were consulted as format descriptions; no implementation code was copied.
 
 The `orphaned-vi` rule's linker-table and path-format research was informed by
 pylabview's [`LVlinkinfo.py`](https://github.com/mefistotelis/pylabview/blob/master/pylabview/LVlinkinfo.py)
