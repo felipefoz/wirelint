@@ -18,11 +18,13 @@ const MAX_VCTP_SIZE: usize = 64 * 1024 * 1024;
 const MAX_VCTP_TYPE_COUNT: usize = 1_000_000;
 /// `TD_FULL_TYPE.Function`: the Type Descriptor kind describing a connector pane.
 const FUNCTION_TYPE: u8 = 0xF0;
+const POLY_VI_TYPE: u8 = 0xF2;
+const CLUSTER_TYPE: u8 = 0x50;
 /// Number of fixed connector pane patterns LabVIEW currently offers.
 const PATTERN_COUNT: u16 = 36;
 
-/// Reads the VI's connector pane pattern index (0-35), identifying one of
-/// LabVIEW's 36 fixed terminal layouts.
+/// Reads the VI's connector pane pattern index (0-35), or `None` for a
+/// polymorphic or global VI, which has no connector pane.
 ///
 /// `conp` and `vctp` are each a block's `(section_count_minus_one,
 /// section_offset)` pair, as found in the RSRC block table. Malformed or
@@ -34,7 +36,7 @@ pub(super) fn read_pattern(
     data: &[u8],
     conp: (usize, usize),
     vctp: (usize, usize),
-) -> io::Result<u8> {
+) -> io::Result<Option<u8>> {
     let conp_type_id = read_conp(table, table_size, data, conp)?;
     let decoded = read_vctp(table, table_size, data, vctp)?;
     let (flat_offsets, top_level) = parse_vctp_lists(&decoded)?;
@@ -45,6 +47,11 @@ pub(super) fn read_pattern(
     let offset = *flat_offsets
         .get(flat_type_id)
         .ok_or_else(|| invalid("connector pane FlatTypeID is out of range"))?;
+    let mut cursor = offset;
+    let (obj_type, _, _) = read_td_header(&decoded, &mut cursor)?;
+    if matches!(obj_type, POLY_VI_TYPE | CLUSTER_TYPE) {
+        return Ok(None);
+    }
     let pattern = read_function_pattern(&decoded, offset)?;
     let pattern_index = pattern >> 3;
     if pattern_index >= PATTERN_COUNT {
@@ -52,7 +59,7 @@ pub(super) fn read_pattern(
             "connector pane pattern code does not match any known pattern",
         ));
     }
-    Ok(pattern_index as u8)
+    Ok(Some(pattern_index as u8))
 }
 
 /// Reads the single big-endian type index stored in an uncompressed `CONP` block.
@@ -291,7 +298,7 @@ mod tests {
             let payload = vctp_payload(&entries, &[0]);
             let (table, data) = fixture(1, &payload);
             let pattern = read_pattern(&table, 0, &data, (0, 0), (0, 20)).unwrap();
-            assert_eq!(pattern, expected_index, "{pattern_code:#x}");
+            assert_eq!(pattern, Some(expected_index), "{pattern_code:#x}");
         }
     }
 
@@ -305,7 +312,19 @@ mod tests {
         let payload = vctp_payload(&entries, &[2]);
         let (table, data) = fixture(1, &payload);
         let pattern = read_pattern(&table, 0, &data, (0, 0), (0, 20)).unwrap();
-        assert_eq!(pattern, (0x60u16 >> 3) as u8);
+        assert_eq!(pattern, Some((0x60u16 >> 3) as u8));
+    }
+
+    #[test]
+    fn skips_known_pane_less_type_descriptors() {
+        for obj_type in [POLY_VI_TYPE, CLUSTER_TYPE] {
+            let payload = vctp_payload(&[td_entry(obj_type, &[])], &[0]);
+            let (table, data) = fixture(1, &payload);
+            assert_eq!(
+                read_pattern(&table, 0, &data, (0, 0), (0, 20)).unwrap(),
+                None
+            );
+        }
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-20
+- Partially superseded by: [decision 0034](0034-pane-less-vi-descriptors.md)
 
 ## Context
 

@@ -12,7 +12,8 @@ cargo run -- scan tests/fixtures --verbose --fail-on none
 cargo run -- sast tests/fixtures --verbose --fail-on none
 ```
 
-The connector-pane rule requires its fixture-specific configuration:
+The connector-pane fixtures include a normal VI and global and polymorphic VIs.
+The rule requires its fixture-specific configuration:
 
 ```text
 cargo run -- scan tests/fixtures/quality/connector-pane-pattern --config tests/fixtures/quality/connector-pane-pattern/checks.yaml --verbose --fail-on none

@@ -456,8 +456,8 @@ any terminal's display style.
 Restricts a VI's connector pane to a configured set of allowed terminal
 patterns, each one of LabVIEW's 36 fixed layouts chosen in the Icon/connector
 pane editor. The rule is enabled by default with `warning` severity and
-applies to VI and VI-template files (`.vi`, `.vit`, `.vim`); controls have no
-connector pane and are skipped.
+applies to VI and VI-template files (`.vi`, `.vit`, `.vim`). Controls and
+global and polymorphic VIs have no connector pane and are skipped.
 
 ```yaml
 rules:
@@ -517,11 +517,13 @@ VI's `VCTP` consolidated type pool) and the `Function`-type Type Descriptor
 it names: a right shift by 3 of that Type Descriptor's raw `pattern` field
 gives the pattern's position in the table above. `VCTP` is always zlib-coded,
 with the same 64 MiB size bound as the block-diagram heap reader. A missing
-or malformed `CONP`/`VCTP` chain, a Type Descriptor that is not a `Function`
-type, or a pattern code outside the 36 known patterns are each an analysis
-error, but only while `allowed-patterns` is configured. See
+or malformed `CONP`/`VCTP` chain, an unexpected Type Descriptor, or a pattern
+code outside the 36 known patterns are each an analysis error, but only while
+`allowed-patterns` is configured. A `PolyVI` (`0xF2`) or `Cluster` (`0x50`)
+descriptor identifies a VI without a connector pane. See
+[decision 0034](../decisions/0034-pane-less-vi-descriptors.md) and
 [decision 0024](../decisions/0024-connector-pane-pattern-rule.md) for the
-full format research. WireLint does not change the VI's connector pane.
+format research. WireLint does not change the VI's connector pane.
 
 ## Adding a built-in rule
 

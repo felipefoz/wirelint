@@ -290,9 +290,7 @@ pub(super) fn read_facts_with_orphaned_vi(
         let conp = conp_section.ok_or_else(|| invalid("missing CONP connector pane block"))?;
         let vctp =
             vctp_section.ok_or_else(|| invalid("missing VCTP consolidated type pool block"))?;
-        Some(super::connector::read_pattern(
-            table, table_size, data, conp, vctp,
-        )?)
+        super::connector::read_pattern(table, table_size, data, conp, vctp)?
     } else {
         None
     };

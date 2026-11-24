@@ -1163,8 +1163,7 @@ fn global_and_polymorphic_fixtures_are_read_without_a_configured_pane_rule() {
         .join("tests")
         .join("fixtures")
         .join("quality")
-        .join("support")
-        .join("vi-types");
+        .join("connector-pane-pattern");
     let directory = TestDirectory::new();
     for file in ["global.vi", "poly.vi"] {
         directory.write(file, fs::read(fixtures.join(file)).unwrap());
@@ -1174,6 +1173,32 @@ fn global_and_polymorphic_fixtures_are_read_without_a_configured_pane_rule() {
     assert!(output.status.success(), "{stdout}");
     assert!(stdout.contains("Analyzed 2 file(s)"), "{stdout}");
     assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+}
+
+#[test]
+fn configured_connector_pane_rule_skips_global_and_polymorphic_vis() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("quality")
+        .join("connector-pane-pattern");
+    let directory = TestDirectory::new();
+    for file in ["global.vi", "poly.vi", "icons-style.vi"] {
+        directory.write(file, fs::read(fixtures.join(file)).unwrap());
+    }
+    let config = directory.write(
+        "checks.yaml",
+        fs::read(fixtures.join("checks.yaml")).unwrap(),
+    );
+    let output = directory.configured_scan(&config, &["--verbose", "--fail-on", "none"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stdout}\n{stderr}");
+    assert!(stdout.contains("Analyzed 3 file(s)"), "{stdout}");
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+    assert!(!stdout.contains("global.vi: warning [connector-pane-pattern]"));
+    assert!(!stdout.contains("poly.vi: warning [connector-pane-pattern]"));
+    assert!(stdout.contains("icons-style.vi: warning [connector-pane-pattern]"));
 }
 
 #[test]

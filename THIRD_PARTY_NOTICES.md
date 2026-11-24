@@ -119,6 +119,11 @@ own code under the MIT License; refer to its
 [license](https://github.com/Zuehlke/labview-mcp/blob/main/LICENSE). See
 [decision 0024](decisions/0024-connector-pane-pattern-rule.md) for the full
 reasoning, including how the raw `pattern` field maps to a pattern offset.
+For pane-less VIs, labview-mcp's `docs/offline-audit-evaluation.md` and
+`LvFileAudit.ConnectorPane` report `PolyVI` (`0xF2`) and `Cluster` (`0x50`)
+descriptors for polymorphic and global VIs, respectively. pylabview's
+`LVdatatype.py` defines those type codes. These were consulted as format
+descriptions; no implementation code or external fixtures were copied.
 
 The typed default-data reader uses pylabview's descriptions of `VCTP`,
 `DTHP`, Type Descriptor references and labels, heap tags (`OF__DefaultData`,
