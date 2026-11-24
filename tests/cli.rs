@@ -980,12 +980,157 @@ fn orphaned_vi_rule_flags_only_a_scanned_library_that_omits_the_vi() {
 }
 
 #[test]
+fn nested_vi_owner_paths_do_not_match_a_same_named_library_in_the_wrong_folder() {
+    let directory = TestDirectory::new();
+    let nested = directory.0.join("nested");
+    fs::create_dir(&nested).unwrap();
+    fs::write(
+        nested.join("member.vi"),
+        support::vi_with_library_path(&["", "", "owner.lvlib"]),
+    )
+    .unwrap();
+    let member = r#"<Item Name="member.vi" Type="VI" URL="../nested/member.vi"/>"#;
+    directory.write(
+        "owner.lvlib",
+        format!(r#"<Library LVVersion="24008000">{member}</Library>"#),
+    );
+    fs::write(
+        nested.join("owner.lvlib"),
+        r#"<Library LVVersion="24008000"/>"#,
+    )
+    .unwrap();
+
+    let output = directory.scan(&["--verbose"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}");
+    assert!(!stdout.contains("[orphaned-vi]"), "{stdout}");
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+
+    directory.write("owner.lvlib", r#"<Library LVVersion="24008000"/>"#);
+    fs::write(
+        nested.join("owner.lvlib"),
+        r#"<Library LVVersion="24008000"><Item Name="member.vi" Type="VI" URL="../member.vi"/></Library>"#,
+    )
+    .unwrap();
+    let output = directory.scan(&["--verbose"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{stdout}");
+    assert!(
+        stdout.contains(&format!(
+            "{}: error [orphaned-vi]",
+            Path::new("nested").join("member.vi").display()
+        )),
+        "{stdout}"
+    );
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+}
+
+#[test]
+fn owner_paths_can_descend_and_cannot_escape_the_scan_root() {
+    let directory = TestDirectory::new();
+    let owners = directory.0.join("owners");
+    fs::create_dir(&owners).unwrap();
+    directory.write(
+        "member.vi",
+        support::vi_with_library_path(&["", "owners", "owner.lvlib"]),
+    );
+    fs::write(
+        owners.join("owner.lvlib"),
+        r#"<Library LVVersion="24008000"/>"#,
+    )
+    .unwrap();
+    let output = directory.scan(&["--verbose"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{stdout}");
+    assert!(
+        stdout.contains("member.vi: error [orphaned-vi]"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+
+    fs::write(
+        owners.join("owner.lvlib"),
+        r#"<Library LVVersion="24008000"><Item Name="member.vi" Type="VI" URL="../../member.vi"/></Library>"#,
+    )
+    .unwrap();
+    let output = directory.scan(&["--verbose"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}");
+    assert!(!stdout.contains("[orphaned-vi]"), "{stdout}");
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+
+    directory.write(
+        "member.vi",
+        support::vi_with_library_path(&["", "", "owner.lvlib"]),
+    );
+    directory.write("owner.lvlib", r#"<Library LVVersion="24008000"/>"#);
+    let output = directory.scan(&["--verbose"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}");
+    assert!(!stdout.contains("[orphaned-vi]"), "{stdout}");
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+}
+
+#[test]
+fn labview_nested_vi_uses_its_actual_owning_library() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("quality")
+        .join("orphaned-vi")
+        .join("nested-owner");
+    let directory = TestDirectory::new();
+    let members = directory.0.join("members");
+    fs::create_dir(&members).unwrap();
+    fs::copy(
+        fixture.join("members").join("NestedMember.vi"),
+        members.join("NestedMember.vi"),
+    )
+    .unwrap();
+    fs::copy(
+        fixture.join("NestedOwner.lvlib"),
+        directory.0.join("NestedOwner.lvlib"),
+    )
+    .unwrap();
+    fs::write(
+        members.join("NestedOwner.lvlib"),
+        r#"<Library LVVersion="24008000"/>"#,
+    )
+    .unwrap();
+
+    let output = directory.scan(&["--verbose", "--fail-on", "none"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}");
+    assert!(!stdout.contains("[orphaned-vi]"), "{stdout}");
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+
+    directory.write("NestedOwner.lvlib", r#"<Library LVVersion="24008000"/>"#);
+    fs::write(
+        members.join("NestedOwner.lvlib"),
+        r#"<Library LVVersion="24008000"><Item Name="NestedMember.vi" Type="VI" URL="../NestedMember.vi"/></Library>"#,
+    )
+    .unwrap();
+    let output = directory.scan(&["--verbose", "--fail-on", "none"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}");
+    assert!(
+        stdout.contains(&format!(
+            "{}: error [orphaned-vi]",
+            Path::new("members").join("NestedMember.vi").display()
+        )),
+        "{stdout}"
+    );
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+}
+
+#[test]
 fn labview_library_member_urls_are_relative_to_the_library_file() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
         .join("quality")
-        .join("orphaned-vi");
+        .join("orphaned-vi")
+        .join("orphaned-member");
     let directory = TestDirectory::new();
     directory.write(
         "orphan-vi.vi",

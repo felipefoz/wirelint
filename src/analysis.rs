@@ -176,8 +176,7 @@ fn apply_orphaned_vi_facts(files: &mut [(PathBuf, formats::FileFacts, Vec<Vec<u8
         let Some(linked_library) = facts.linked_library.as_deref() else {
             continue;
         };
-        let base = vi_path.parent().unwrap_or_else(|| Path::new(""));
-        let Some(library_path) = resolve_scanned_path(base, &linked_library.to_string_lossy())
+        let Some(library_path) = resolve_scanned_path(vi_path, &linked_library.to_string_lossy())
         else {
             continue;
         };

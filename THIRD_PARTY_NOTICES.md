@@ -61,6 +61,10 @@ consulted as format descriptions; no implementation code was copied.
 The library member URL interpretation was also checked against labview-mcp's
 offline file reader and its saved-library fixtures. Those references were
 consulted read-only; the test VI is a user-created sandbox VI.
+The VI owner path's file-relative base and empty-component semantics were
+checked against labview-mcp's offline file reader and its evaluation of saved
+VIs. pylabview's `LVclasses.py` was consulted for the `PTH0` component format.
+No implementation code was copied.
 
 Block-diagram bookmark extraction was informed by pylabview's `HeapVerb` in
 [`LVblock.py`](https://github.com/mefistotelis/pylabview/blob/master/pylabview/LVblock.py),

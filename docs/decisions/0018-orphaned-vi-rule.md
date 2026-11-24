@@ -46,6 +46,14 @@ directory-relative interpretation produced false orphan findings for listed
 members. Using the directory for URLs without `..` as a fallback would
 misinterpret paths and could hide real orphans, so no fallback is used.
 
+## Amendment (2026-11-24): resolve owner paths against the VI file
+
+Relative `PTH0` owner paths start at the VI file, and each empty component
+ascends one level. Preserve those components as `..` and resolve the path
+against the VI file, subject to the existing scan-root boundary. Dropping
+empty components and starting at the VI's directory could select a
+same-named library in the wrong directory or skip a scanned owner.
+
 ## References
 
 - [Rule architecture](0006-rule-runner-and-source-only-check.md)

@@ -389,7 +389,7 @@ fn read_vi_library_link(
     Ok(library_path)
 }
 
-/// Finds the relative PTH0 path attached to the VI-to-library link object.
+/// Finds the VI-relative PTH0 owner path, translating empty components to `..`.
 fn read_vilb_path(payload: &[u8]) -> io::Result<Option<PathBuf>> {
     let mut vilb = None;
     for (offset, tag) in payload.windows(4).enumerate() {
@@ -411,7 +411,11 @@ fn read_vilb_path(payload: &[u8]) -> io::Result<Option<PathBuf>> {
     }
     let mut path = PathBuf::new();
     for component in components {
-        path.push(component);
+        path.push(if component.is_empty() {
+            ".."
+        } else {
+            &component
+        });
     }
     Ok(Some(path))
 }
@@ -1178,7 +1182,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             facts.0.linked_library,
-            Some(PathBuf::from("orphaned-example.lvlib"))
+            Some(PathBuf::from("..").join("orphaned-example.lvlib"))
         );
         assert_eq!(
             super::super::read_facts_with_orphaned_vi(

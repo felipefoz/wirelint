@@ -2,14 +2,25 @@
 
 /// Builds the supported VI subset with LVSR settings and a relative LIvi owner.
 ///
-/// `library` is one UTF-8 path component with at most 255 bytes. No external
-/// files or LabVIEW installation are needed.
+/// `library` is a sibling library name of at most 255 UTF-8 bytes.
 pub fn vi_with_library_link(library: &str) -> Vec<u8> {
-    let component_length = u8::try_from(library.len()).expect("fixture path component is too long");
+    vi_with_library_path(&["", library])
+}
+
+/// Builds a VI with the supplied relative PTH0 owner path components.
+///
+/// Empty components ascend one level from the VI file. Each component must
+/// fit in one byte of length; no LabVIEW installation is needed.
+pub fn vi_with_library_path(components: &[&str]) -> Vec<u8> {
     let mut link = b"VILBPTH0".to_vec();
-    link.extend_from_slice(&(5 + library.len() as u32).to_be_bytes());
-    link.extend_from_slice(&[0, 1, 0, 1, component_length]);
-    link.extend_from_slice(library.as_bytes());
+    let path_size: usize = components.iter().map(|component| 1 + component.len()).sum();
+    link.extend_from_slice(&u32::try_from(4 + path_size).unwrap().to_be_bytes());
+    link.extend_from_slice(&1u16.to_be_bytes());
+    link.extend_from_slice(&u16::try_from(components.len()).unwrap().to_be_bytes());
+    for component in components {
+        link.push(u8::try_from(component.len()).expect("fixture path component is too long"));
+        link.extend_from_slice(component.as_bytes());
+    }
 
     let data_size = 72 + 4 + link.len();
     let table_size = 4 + 2 * 12;

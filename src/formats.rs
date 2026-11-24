@@ -70,7 +70,7 @@ pub struct FileFacts {
     pub auto_error_handling: Option<bool>,
     /// Whether a password is set; absent for controls and XML containers.
     pub has_password: Option<bool>,
-    /// Relative path to the owning library, when present in the VI link table.
+    /// Path to the owning library relative to the VI file, when present in its link table.
     pub linked_library: Option<PathBuf>,
     /// VI member URLs listed by an `.lvlib`, when requested.
     pub library_members: Option<Vec<String>>,
