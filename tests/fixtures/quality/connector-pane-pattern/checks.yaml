@@ -1,0 +1,5 @@
+version: 1
+rules:
+  connector-pane-pattern:
+    allowed-patterns:
+      - "1"

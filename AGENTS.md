@@ -2,6 +2,8 @@
 
 - Keep changes focused and follow existing Rust style.
 - Add focused tests for every new feature.
+- Add one or more representative fixtures in `tests/fixtures/quality/<rule-id>/` or `tests/fixtures/sast/<rule-id>/` for every new rule, including any configuration needed to exercise it.
+- When validating changes, run both `cargo run -- scan tests/fixtures --verbose --fail-on none` and `cargo run -- sast tests/fixtures --verbose --fail-on none`; inspect findings and ensure there are no analysis errors. Use a fixture-specific configuration when a rule requires one.
 - Add concise module-level documentation and function doc comments that explain purpose, contracts, relevant errors, and invariants without restating obvious code.
 - Run `cargo fmt --check` and `cargo test` for Rust changes.
 - Run `cargo clippy --all-targets --all-features -- -D warnings` when practical.

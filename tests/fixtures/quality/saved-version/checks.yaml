@@ -1,0 +1,5 @@
+version: 1
+rules:
+  saved-version:
+    minimum-version: "20.0"
+    maximum-version: "20.0"

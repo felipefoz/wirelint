@@ -4,4 +4,4 @@
 *.vim binary
 *.ctl binary
 # Preserve this LabVIEW-saved fixture's mixed line endings.
-/tests/fixtures/quality/examples/class1.lvclass binary
+/tests/fixtures/quality/class-mutation-history/class1.lvclass binary
