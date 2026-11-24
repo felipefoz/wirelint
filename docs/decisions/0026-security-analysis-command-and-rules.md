@@ -81,8 +81,8 @@ excluded entirely rather than deferred to Tier 2.
     assert. CWE depends on the matched entry's configured category (for
     example CWE-78 for an OS-command-execution VI); the option's exact shape
     and per-entry CWE tagging are worked out in that rule's own decision.
-  - `hardcoded-secret-default` — scans default string values (from `FPHb`
-    since decision 0030) for
+  - `hardcoded-secret-default` — scans string defaults (`FPHb`, decision 0030)
+    and scalar diagram string constants (`BDHb`, decision 0031) for
     secret-shaped content. CWE-798, CWE-259.
   - `clfn-library-path` — reads CLFN DLL path/name fields once `heap.rs`
     recognizes the node subtype. CWE-427. Higher cost than the other three;

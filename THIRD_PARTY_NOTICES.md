@@ -126,6 +126,9 @@ VIs. See [decision 0027](docs/decisions/0027-typed-default-data-reader.md) and
 The front-panel name-label reader also uses pylabview's `OF__ddo`,
 `OF__partsList`, and `OF__partID` tags in `LVheap.py` and
 `PARTID.NAME_LABEL` in `LVparts.py` as format references.
+The scalar diagram-string reader uses pylabview's `SL__bDConstDCO`,
+`SL__stdString`, and `OF__ConstValue` in `LVheap.py`, and labview-mcp's
+`experiments/pylabview/FINDINGS.md` section 3.19 as format references.
 
 ## Rust dependencies
 

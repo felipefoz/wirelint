@@ -131,6 +131,7 @@ pub(super) fn read_facts_with_orphaned_vi(
     let mut li_vi_seen = false;
     let mut linked_library = None;
     let mut bookmarks = Vec::new();
+    let mut diagram_string_values = Vec::new();
     let mut diagram_seen = false;
     let mut terminal_icon_styles = is_vi.then(Vec::new);
     let mut conp_seen = false;
@@ -185,15 +186,17 @@ pub(super) fn read_facts_with_orphaned_vi(
                 return Err(invalid("duplicate BDHb block diagram"));
             }
             diagram_seen = true;
-            let (block_bookmarks, block_terminal_icon_styles) = super::heap::read_bdhb(
+            let diagram = super::heap::read_bdhb(
                 table,
                 table_size,
                 data,
                 number(block, 4)?,
                 number(block, 8)?,
+                read_default_strings,
             )?;
-            bookmarks = block_bookmarks;
-            terminal_icon_styles = Some(block_terminal_icon_styles);
+            bookmarks = diagram.bookmarks;
+            terminal_icon_styles = Some(diagram.terminal_icon_styles);
+            diagram_string_values = diagram.string_constants;
         } else if is_vi && matches!(&block[..4], b"BDHP" | b"BDHc") {
             return Err(invalid(
                 "unsupported block diagram heap format for bookmark extraction",
@@ -333,6 +336,7 @@ pub(super) fn read_facts_with_orphaned_vi(
             terminal_icon_styles,
             connector_pane_pattern,
             default_string_values,
+            diagram_string_values: (read_default_strings && is_vi).then_some(diagram_string_values),
         },
         bookmarks,
     ))
@@ -674,7 +678,7 @@ mod tests {
         bytes
     }
 
-    fn fixture_with_default_strings() -> Vec<u8> {
+    fn fixture_with_default_strings(diagram_value: Option<&[u8]>) -> Vec<u8> {
         fn node(heap: &mut Vec<u8>, tag: i32, scope: u8, class: Option<i16>, content: &[u8]) {
             let tag = (tag + 31) as u16;
             let size = if content.is_empty() { 0 } else { 6 };
@@ -716,6 +720,26 @@ mod tests {
         node(&mut heap, -6, 2, None, &[]);
         let mut fphb_payload = (heap.len() as u32).to_be_bytes().to_vec();
         fphb_payload.extend_from_slice(&heap);
+        let mut heap = Vec::new();
+        node(&mut heap, -7, 0, Some(27), &[]);
+        node(&mut heap, 48, 0, Some(19), &[]);
+        node(&mut heap, 52, 0, Some(81), &[]);
+        node(&mut heap, 194, 0, None, &[]);
+        node(&mut heap, -6, 0, Some(10), &[]);
+        node(&mut heap, 192, 1, None, &[16]);
+        node(&mut heap, 270, 0, Some(1), &[]);
+        node(&mut heap, 3, 1, None, b"API Key");
+        node(&mut heap, 270, 2, None, &[]);
+        node(&mut heap, -6, 2, None, &[]);
+        node(&mut heap, 194, 2, None, &[]);
+        node(&mut heap, 52, 2, None, &[]);
+        if let Some(value) = diagram_value {
+            node(&mut heap, 589, 1, None, value);
+        }
+        node(&mut heap, 48, 2, None, &[]);
+        node(&mut heap, -7, 2, None, &[]);
+        let mut bdhb_payload = (heap.len() as u32).to_be_bytes().to_vec();
+        bdhb_payload.extend_from_slice(&heap);
         let mut dthp_payload = vec![0, 1, 0, 1];
         let records = [
             {
@@ -740,6 +764,12 @@ mod tests {
                 record.extend_from_slice(&coded);
                 record
             },
+            {
+                let coded = zlib_coded(&bdhb_payload);
+                let mut record = (coded.len() as u32).to_be_bytes().to_vec();
+                record.extend_from_slice(&coded);
+                record
+            },
         ];
         let mut data = Vec::new();
         let mut data_offsets = Vec::new();
@@ -749,7 +779,7 @@ mod tests {
         }
 
         let table_header_size = 52;
-        let block_count = 4;
+        let block_count = 5;
         let table_size = 4 + 12 * block_count + 20 * block_count;
         let info_size = table_header_size + table_size;
         let info_offset = 32 + data.len();
@@ -767,7 +797,7 @@ mod tests {
         put(&mut bytes, info_offset + 48, info_size as u32);
         let table = info_offset + table_header_size;
         put(&mut bytes, table, (block_count - 1) as u32);
-        let names = [b"LVSR", b"FPHb", b"DTHP", b"VCTP"];
+        let names = [b"LVSR", b"FPHb", b"DTHP", b"VCTP", b"BDHb"];
         for index in 0..block_count {
             let block = table + 4 + 12 * index;
             bytes[block..block + 4].copy_from_slice(names[index]);
@@ -1214,7 +1244,7 @@ mod tests {
 
     #[test]
     fn reads_default_strings_only_when_requested() {
-        let bytes = fixture_with_default_strings();
+        let bytes = fixture_with_default_strings(Some(b"\0\0\0\x08abc12345"));
         assert!(
             super::super::read_facts_with_orphaned_vi(
                 std::path::Path::new("ordinary.vi"),
@@ -1249,11 +1279,20 @@ mod tests {
                 bytes: b"hunter22".to_vec(),
             }])
         );
+        assert_eq!(
+            facts.diagram_string_values,
+            Some(vec![super::super::DiagramStringConstant {
+                label: Some(b"API Key".to_vec()),
+                bytes: b"abc12345".to_vec(),
+            }])
+        );
         let finding = crate::rules::sast::BUILT_INS[0]
             .check(&facts, None)
             .unwrap();
         assert!(finding.contains("\"Password\" (credential-named control)"));
+        assert!(finding.contains("and 1 other value"));
         assert!(!finding.contains("hunter22"));
+        assert!(!finding.contains("abc12345"));
         assert!(
             super::super::read_facts_with_orphaned_vi(
                 std::path::Path::new("ordinary.vi"),
@@ -1269,6 +1308,30 @@ mod tests {
             .0
             .default_string_values
             .is_none()
+        );
+    }
+
+    #[test]
+    fn invalid_diagram_constant_is_an_error_only_when_requested() {
+        let bytes = fixture_with_default_strings(None);
+        let read = |requested| {
+            super::super::read_facts_with_orphaned_vi(
+                std::path::Path::new("defaults.vi"),
+                &bytes,
+                false,
+                false,
+                false,
+                false,
+                false,
+                requested,
+            )
+        };
+        assert!(read(false).is_ok());
+        let error = read(true).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("string constant has no ConstValue")
         );
     }
 }

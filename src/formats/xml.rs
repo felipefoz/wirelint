@@ -153,6 +153,7 @@ pub(super) fn read_facts_with_members(
             terminal_icon_styles: None,
             connector_pane_pattern: None,
             default_string_values: None,
+            diagram_string_values: None,
         },
         directives,
     ))

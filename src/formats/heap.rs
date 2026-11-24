@@ -1,5 +1,5 @@
 //! Bounded decoding of version-b object heaps: block-diagram free-label
-//! bookmarks and front-panel terminal display styles from `BDHb`, and
+//! bookmarks, terminal display styles, and string constants from `BDHb`, and
 //! front-panel control defaults and name labels from `FPHb`.
 
 use super::{invalid, rsrc};
@@ -27,10 +27,15 @@ const FP_TERM: i32 = 22;
 const OBJ_FLAGS: i32 = 172;
 /// `SL__fPDCO`: a front-panel control or indicator object in the FPHb heap.
 const FP_DCO: i32 = 18;
+/// `SL__bDConstDCO` and `SL__stdString`: a string constant and its display object.
+const BD_CONST_DCO: i32 = 19;
+const STD_STRING: i32 = 81;
 /// `OF__typeDesc`: a heap TypeID field.
 const TYPE_DESC: i32 = 283;
 /// `OF__DefaultData`: an object's default value in flattened form.
 const DEFAULT_DATA: i32 = 571;
+/// `OF__ConstValue`: the flattened value stored on a diagram constant.
+const CONST_VALUE: i32 = 589;
 /// Terminal object-flags bit selecting icon-style display; clear is data-type style.
 const ICON_STYLE_FLAG: u32 = 0x0400_0000;
 
@@ -40,18 +45,22 @@ struct Node {
     class: Option<i32>,
 }
 
+/// Facts obtained from one block-diagram heap.
+pub(super) struct DiagramHeapFacts {
+    pub bookmarks: Vec<Vec<u8>>,
+    pub terminal_icon_styles: Vec<bool>,
+    pub string_constants: Vec<DiagramStringConstant>,
+}
+
 /// Reads the sole compressed BDHb section, rejecting malformed or oversized heaps.
-///
-/// Returns free-label bookmarks and, in terminal order, each front-panel
-/// terminal's icon-style flag (`true` for icon style, `false` for data-type
-/// style).
 pub(super) fn read_bdhb(
     table: &[u8],
     table_size: usize,
     data: &[u8],
     count_minus_one: usize,
     section_offset: usize,
-) -> io::Result<(Vec<Vec<u8>>, Vec<bool>)> {
+    read_constants: bool,
+) -> io::Result<DiagramHeapFacts> {
     let heap = read_heap(
         "BDHb",
         table,
@@ -60,7 +69,25 @@ pub(super) fn read_bdhb(
         count_minus_one,
         section_offset,
     )?;
-    parse_heap(&heap).map_err(|error| invalid(format!("BDHb heap: {error}")))
+    let (bookmarks, styles) =
+        parse_heap(&heap).map_err(|error| invalid(format!("BDHb heap: {error}")))?;
+    let constants = if read_constants {
+        parse_diagram_strings(&heap).map_err(|error| invalid(format!("BDHb heap: {error}")))?
+    } else {
+        Vec::new()
+    };
+    Ok(DiagramHeapFacts {
+        bookmarks,
+        terminal_icon_styles: styles,
+        string_constants: constants,
+    })
+}
+
+/// A scalar diagram string constant's saved value and optional object label.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiagramStringConstant {
+    pub label: Option<Vec<u8>>,
+    pub bytes: Vec<u8>,
 }
 
 /// A front-panel control's stored default value, as kept in its heap object.
@@ -156,9 +183,9 @@ enum Scope {
 /// Tokenizes a heap and validates its scope nesting, calling `visit` with the
 /// enclosing scopes, the node, its scope kind, and its content. For `Close`,
 /// the parents exclude the node being closed.
-fn walk_heap(
-    bytes: &[u8],
-    mut visit: impl FnMut(&[Node], Node, Scope, &[u8]) -> io::Result<()>,
+fn walk_heap<'a>(
+    bytes: &'a [u8],
+    mut visit: impl FnMut(&[Node], Node, Scope, &'a [u8]) -> io::Result<()>,
 ) -> io::Result<()> {
     let mut cursor = 0;
     let mut stack: Vec<Node> = Vec::new();
@@ -250,18 +277,150 @@ fn parse_heap(bytes: &[u8]) -> io::Result<(Vec<Vec<u8>>, Vec<bool>)> {
     Ok((bookmarks, terminal_icon_styles))
 }
 
+#[derive(Default)]
+struct LabelPart {
+    part_id: Option<u32>,
+    text: Option<Vec<u8>>,
+}
+
+#[derive(Default)]
+struct NameLabel {
+    label: Option<Vec<u8>>,
+    part: Option<LabelPart>,
+}
+
+impl NameLabel {
+    /// Reads only the name-label part directly owned by the object's DDO.
+    fn visit(
+        &mut self,
+        parents: &[Node],
+        node: Node,
+        scope: Scope,
+        content: &[u8],
+    ) -> io::Result<()> {
+        if matches!(scope, Scope::Open | Scope::Close)
+            && node.tag == ARRAY_ELEMENT
+            && node.class == Some(LABEL)
+            && parents.len() == 3
+            && parents[1].tag == DDO
+            && parents[2].tag == PARTS_LIST
+        {
+            if scope == Scope::Open {
+                self.part = Some(LabelPart::default());
+            } else if let Some(part) = self.part.take()
+                && part.part_id == Some(NAME_LABEL)
+                && let Some(text) = part.text
+                && self.label.replace(text).is_some()
+            {
+                return Err(invalid("duplicate object name label"));
+            }
+        } else if let Some(part) = self.part.as_mut()
+            && matches!(scope, Scope::Open | Scope::Leaf)
+        {
+            if parents.len() == 4 && node.tag == PART_ID {
+                if content.len() > 4 {
+                    return Err(invalid("oversized label partID"));
+                }
+                let mut bytes = [0; 4];
+                bytes[4 - content.len()..].copy_from_slice(content);
+                if part.part_id.replace(u32::from_be_bytes(bytes)).is_some() {
+                    return Err(invalid("duplicate label partID"));
+                }
+            } else if parents.len() == 5
+                && parents[4].tag == TEXT_RECORD
+                && parents[4].class == Some(TEXT_HAIR)
+                && node.tag == TEXT
+                && part.text.replace(content.to_vec()).is_some()
+            {
+                return Err(invalid("duplicate label text"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Extracts scalar string constants from their own `bDConstDCO` objects.
+///
+/// Missing or malformed saved values are errors, never empty strings.
+fn parse_diagram_strings(bytes: &[u8]) -> io::Result<Vec<DiagramStringConstant>> {
+    struct OpenConstant<'a> {
+        depth: usize,
+        ddo_class: Option<i32>,
+        ddo_seen: bool,
+        duplicate_ddo: bool,
+        data: Option<&'a [u8]>,
+        duplicate_data: bool,
+        name: NameLabel,
+    }
+    let mut open: Vec<OpenConstant> = Vec::new();
+    let mut strings = Vec::new();
+    walk_heap(bytes, |stack, node, scope, content| {
+        if node.class == Some(BD_CONST_DCO) && scope == Scope::Open {
+            open.push(OpenConstant {
+                depth: stack.len(),
+                ddo_class: None,
+                ddo_seen: false,
+                duplicate_ddo: false,
+                data: None,
+                duplicate_data: false,
+                name: NameLabel::default(),
+            });
+        } else if node.class == Some(BD_CONST_DCO) && scope == Scope::Close {
+            let constant = open
+                .pop()
+                .ok_or_else(|| invalid("unmatched diagram constant"))?;
+            if constant.ddo_class == Some(STD_STRING) {
+                if constant.duplicate_ddo || constant.duplicate_data {
+                    return Err(invalid("duplicate string constant DDO or ConstValue"));
+                }
+                let data = constant
+                    .data
+                    .ok_or_else(|| invalid("string constant has no ConstValue"))?;
+                let length = rsrc::number(data, 0)?;
+                let value = rsrc::slice(data, 4, length)?;
+                if length != data.len() - 4 {
+                    return Err(invalid("string constant has trailing ConstValue data"));
+                }
+                strings.push(DiagramStringConstant {
+                    label: constant.name.label,
+                    bytes: value.to_vec(),
+                });
+            }
+        } else if let Some(constant) = open.last_mut() {
+            let parents = &stack[constant.depth..];
+            if parents.len() == 1 && scope == Scope::Open && node.tag == DDO {
+                if constant.ddo_seen {
+                    constant.duplicate_ddo = true;
+                } else {
+                    constant.ddo_seen = true;
+                    constant.ddo_class = node.class;
+                }
+            } else if parents.len() == 1
+                && matches!(scope, Scope::Open | Scope::Leaf)
+                && node.tag == CONST_VALUE
+            {
+                if constant.data.is_some() {
+                    constant.duplicate_data = true;
+                } else {
+                    constant.data = Some(content);
+                }
+            }
+            if constant.ddo_class == Some(STD_STRING) {
+                constant.name.visit(parents, node, scope, content)?;
+            }
+        }
+        Ok(())
+    })?;
+    Ok(strings)
+}
+
 /// Collects direct defaults and name labels of front-panel controls.
 fn parse_front_panel(bytes: &[u8]) -> io::Result<Vec<ControlDefault>> {
-    struct LabelPart {
-        part_id: Option<u32>,
-        text: Option<Vec<u8>>,
-    }
     struct OpenControl {
         depth: usize,
         type_id: Option<usize>,
         data: Option<Vec<u8>>,
-        label: Option<Vec<u8>>,
-        label_part: Option<LabelPart>,
+        name: NameLabel,
     }
     let mut open: Vec<OpenControl> = Vec::new();
     let mut defaults = Vec::new();
@@ -272,8 +431,7 @@ fn parse_front_panel(bytes: &[u8]) -> io::Result<Vec<ControlDefault>> {
                 depth: stack.len(),
                 type_id: None,
                 data: None,
-                label: None,
-                label_part: None,
+                name: NameLabel::default(),
             }),
             Scope::Close if is_control => {
                 let control = open
@@ -285,42 +443,18 @@ fn parse_front_panel(bytes: &[u8]) -> io::Result<Vec<ControlDefault>> {
                         .ok_or_else(|| invalid("FPHb control default has no typeDesc"))?;
                     defaults.push(ControlDefault {
                         type_id,
-                        label: control.label,
+                        label: control.name.label,
                         data,
                     });
                 }
             }
-            Scope::Open | Scope::Close
-                if node.tag == ARRAY_ELEMENT && node.class == Some(LABEL) =>
-            {
-                if let Some(control) = open.last_mut() {
-                    let parents = &stack[control.depth..];
-                    if parents.len() == 3
-                        && parents[0].class == Some(FP_DCO)
-                        && parents[1].tag == DDO
-                        && parents[2].tag == PARTS_LIST
-                    {
-                        if scope == Scope::Open {
-                            control.label_part = Some(LabelPart {
-                                part_id: None,
-                                text: None,
-                            });
-                        } else if let Some(part) = control.label_part.take()
-                            && part.part_id == Some(NAME_LABEL)
-                            && let Some(text) = part.text
-                            && control.label.replace(text).is_some()
-                        {
-                            return Err(invalid("duplicate FPHb control name label"));
-                        }
-                    }
-                }
-            }
-            Scope::Open | Scope::Leaf => {
+            _ => {
                 let Some(control) = open.last_mut() else {
                     return Ok(());
                 };
                 let parents = &stack[control.depth..];
-                if parents.len() == 1 {
+                control.name.visit(parents, node, scope, content)?;
+                if parents.len() == 1 && matches!(scope, Scope::Open | Scope::Leaf) {
                     if node.tag == TYPE_DESC && control.type_id.is_none() {
                         control.type_id = Some(type_id(content)?);
                     } else if node.tag == DEFAULT_DATA
@@ -328,27 +462,8 @@ fn parse_front_panel(bytes: &[u8]) -> io::Result<Vec<ControlDefault>> {
                     {
                         return Err(invalid("duplicate FPHb control DefaultData"));
                     }
-                } else if let Some(part) = control.label_part.as_mut() {
-                    if parents.len() == 4 && node.tag == PART_ID {
-                        if content.len() > 4 {
-                            return Err(invalid("oversized FPHb label partID"));
-                        }
-                        let mut bytes = [0; 4];
-                        bytes[4 - content.len()..].copy_from_slice(content);
-                        if part.part_id.replace(u32::from_be_bytes(bytes)).is_some() {
-                            return Err(invalid("duplicate FPHb label partID"));
-                        }
-                    } else if parents.len() == 5
-                        && parents[4].tag == TEXT_RECORD
-                        && parents[4].class == Some(TEXT_HAIR)
-                        && node.tag == TEXT
-                        && part.text.replace(content.to_vec()).is_some()
-                    {
-                        return Err(invalid("duplicate FPHb label text"));
-                    }
                 }
             }
-            Scope::Close => {}
         }
         Ok(())
     })?;
@@ -628,6 +743,80 @@ mod tests {
                 Some(&b"Username"[..])
             ]
         );
+    }
+
+    fn diagram_constant(heap: &mut Vec<u8>, class: i16, name: Option<&[u8]>, data: Option<&[u8]>) {
+        node(heap, 48, 0, Some(BD_CONST_DCO as i16), &[]);
+        node(heap, DDO, 0, Some(class), &[]);
+        node(heap, PARTS_LIST, 0, None, &[]);
+        for (id, text) in [
+            (82, b"Password caption".as_slice()),
+            (16, name.unwrap_or(b"")),
+        ] {
+            if text.is_empty() {
+                continue;
+            }
+            node(heap, ARRAY_ELEMENT, 0, Some(LABEL as i16), &[]);
+            node(heap, PART_ID, 1, None, &[id]);
+            node(heap, TEXT_RECORD, 0, Some(TEXT_HAIR as i16), &[]);
+            node(heap, TEXT, 1, None, text);
+            node(heap, TEXT_RECORD, 2, None, &[]);
+            node(heap, ARRAY_ELEMENT, 2, None, &[]);
+        }
+        node(heap, PARTS_LIST, 2, None, &[]);
+        node(heap, DDO, 2, None, &[]);
+        if let Some(data) = data {
+            node(heap, CONST_VALUE, 1, None, data);
+        }
+        node(heap, 48, 2, None, &[]);
+    }
+
+    #[test]
+    fn reads_labeled_and_unlabeled_string_constants_in_nested_diagrams() {
+        let mut heap = Vec::new();
+        node(&mut heap, -7, 0, Some(DIAGRAM as i16), &[]);
+        diagram_constant(
+            &mut heap,
+            STD_STRING as i16,
+            Some(b"Password"),
+            Some(b"\0\0\0\x06secret"),
+        );
+        node(&mut heap, 63, 0, None, &[]);
+        node(&mut heap, ARRAY_ELEMENT, 0, Some(DIAGRAM as i16), &[]);
+        diagram_constant(&mut heap, STD_STRING as i16, None, Some(b"\0\0\0\x05token"));
+        diagram_constant(&mut heap, 80, Some(b"Password"), Some(b"\0\0\0\x05value"));
+        node(&mut heap, ARRAY_ELEMENT, 2, None, &[]);
+        node(&mut heap, 63, 2, None, &[]);
+        node(&mut heap, -7, 2, None, &[]);
+        assert_eq!(
+            parse_diagram_strings(&heap).unwrap(),
+            vec![
+                DiagramStringConstant {
+                    label: Some(b"Password".to_vec()),
+                    bytes: b"secret".to_vec()
+                },
+                DiagramStringConstant {
+                    label: None,
+                    bytes: b"token".to_vec()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_missing_or_malformed_string_constant_values() {
+        for data in [
+            None,
+            Some(&b"\0\0\0\x05abc"[..]),
+            Some(&b"\0\0\0\x01ab"[..]),
+        ] {
+            let mut heap = Vec::new();
+            diagram_constant(&mut heap, STD_STRING as i16, None, data);
+            assert!(parse_diagram_strings(&heap).is_err());
+        }
+        let mut heap = Vec::new();
+        diagram_constant(&mut heap, 80, None, None);
+        assert!(parse_diagram_strings(&heap).unwrap().is_empty());
     }
 
     #[test]

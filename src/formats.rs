@@ -6,6 +6,7 @@ mod rsrc;
 mod typed_data;
 mod xml;
 
+pub use heap::DiagramStringConstant;
 pub use typed_data::DefaultStringValue;
 
 use std::io;
@@ -85,6 +86,8 @@ pub struct FileFacts {
     pub connector_pane_pattern: Option<u8>,
     /// String defaults of a VI's front-panel controls, from `FPHb`, when requested.
     pub default_string_values: Option<Vec<DefaultStringValue>>,
+    /// Scalar string constants stored in a VI's block-diagram source heap.
+    pub diagram_string_values: Option<Vec<DiagramStringConstant>>,
 }
 
 /// Reads a VI-family RSRC file or an XML project/library/class document.

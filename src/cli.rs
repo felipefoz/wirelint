@@ -54,7 +54,7 @@ enum Command {
     },
     /// Discover LabVIEW files and run enabled security analysis rules.
     #[command(
-        long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults for credentials (credential-named controls, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. Tier 1 checks read facts already stored in the file; none of them trace data flow, so a finding means 'needs review', not 'confirmed exploitable'. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
+        long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults and scalar block-diagram string constants for credentials (credential-named controls and constants, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. Tier 1 checks read facts already stored in the file; none of them trace data flow, so a finding means 'needs review', not 'confirmed exploitable'. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
     )]
     Sast {
         /// Folder to scan.
@@ -393,6 +393,7 @@ mod tests {
             .render_long_help()
             .to_string();
         assert!(help.contains("Print the scan type on stdout"), "{help}");
+        assert!(help.contains("block-diagram string constants"), "{help}");
     }
 
     #[test]

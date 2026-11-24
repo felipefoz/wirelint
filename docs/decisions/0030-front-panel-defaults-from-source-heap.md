@@ -85,9 +85,8 @@ heap, and wired diagram constants in `ConstValue`.
 `vi.lib` it analyzed all 33,052 files with no analysis errors, in 8.5 s with a
 warm file cache. The first run after the files leave the cache is dominated
 by disk reads and was several minutes on Windows. Values in types the walker
-does not support are skipped silently. Block-diagram string constants
-(`ConstValue` in `BDHb`) are not read yet; the shared heap tokenizer is the
-basis for that work.
+does not support are skipped silently. Decision 0031 extends the shared heap
+tokenizer to read scalar block-diagram string constants from `BDHb`.
 
 ## References
 

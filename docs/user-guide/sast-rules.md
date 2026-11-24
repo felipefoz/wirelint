@@ -16,7 +16,8 @@ All SAST rules are enabled by default and use the shared `enabled` and
 
 ## `hardcoded-secret-default`
 
-Reports VI string defaults that appear to contain a stored credential.
+Reports VI string defaults and scalar block-diagram string constants that
+appear to contain a stored credential.
 
 | Setting | Value |
 | --- | --- |
@@ -26,16 +27,16 @@ Reports VI string defaults that appear to contain a stored credential.
 | Applies to | VI-family resources (`.vi`, `.vit`, `.vim`) |
 | Rule-specific options | None |
 
-Each string default is checked with these heuristics, strongest first:
+Each string is checked with these heuristics, strongest first:
 
 1. **Private keys and token formats.** PEM/PGP private-key headers, AWS
    access key IDs (`AKIA`/`ASIA`), GitHub, GitLab, Slack, Google API, and
    Stripe live keys, and signed JSON Web Tokens. These match anywhere in the
    text, without a key name.
-2. **Credential-named controls.** The default of a control or indicator
-   whose label names a credential, such as `Password`, `DB Password`,
-   `API Key`, `access_token`, `Client Secret`, or `Kennwort`. For cluster and
-   array members, the innermost labeled level decides.
+2. **Credential-named values.** A constant or a control/indicator default
+   whose label names a credential, such as `Password`, `DB Password`, `API Key`,
+   `access_token`, `Client Secret`, or `Kennwort`. For cluster and array
+   defaults, the innermost labeled level decides.
 3. **Credential assignments in text.** A credential-named key followed by a
    value: `password=...`, `pwd: ...`, `"api_key": "..."`, `token := ...`,
    `secret => ...`, `<password>...</password>`, `scheme://user:pass@host`,
@@ -59,10 +60,10 @@ reference a variable or template (`$NAME`, `${NAME}`, `$(NAME)`, `%NAME%`,
 read like a message: text with spaces that ends in `.`, `!`, or `?`, or that
 mentions a credential term (`The password is incorrect!`).
 
-The finding names where the first match was found, using the control's labels
-(for example `"Settings" > "DB Password"`) or its type entry when no
-label is stored, together with the heuristic that matched. It counts any other
-matching defaults in the file. The message never includes a stored value.
+The finding names where the first match was found, using a constant's label,
+the control's labels (for example `"Settings" > "DB Password"`), or its type
+entry when no label is stored, together with the heuristic that matched. It
+counts other matching strings in the file. The message never includes a stored value.
 Findings are review signals, not confirmation of exploitability. Remove the
 credential or load it from an appropriate secret store at runtime.
 
@@ -70,10 +71,15 @@ The rule reads the default values that front-panel controls store in the VI's
 source, for VIs saved with or without separate compiled code. It uses each
 control's front-panel name when available, falling back to its type descriptor
 label. Nested values use their type descriptor labels. A control whose data type
-the reader does not support is skipped. It does not inspect block-diagram string
-constants, the front panel's "Password Display" setting, or secrets stored in
-other data types. Secrets without a recognized name or format are not
-reported.
+the reader does not support is skipped. Scalar block-diagram string constants
+with `stdString` display objects are read from the `BDHb` source heap,
+including those in nested diagrams.
+String values inside composite diagram constants are not inspected. A string
+constant with missing or malformed saved data produces an analysis error;
+without a block-diagram source heap there are no diagram constants to inspect.
+The rule does not inspect the front panel's "Password Display" setting or
+secrets stored in other data types. Secrets without a recognized name or
+format are not reported.
 
 Rule suppression directives are shared across commands. Their syntax and
 limitations are documented in the

@@ -1,11 +1,11 @@
-//! `hardcoded-secret-default`: credentials stored in VI string defaults.
+//! `hardcoded-secret-default`: credentials stored in VI defaults or constants.
 //!
-//! Each extracted default is classified by the strongest matching heuristic:
-//! private-key blocks and well-known token formats, defaults of
-//! credential-named controls, then credential assignments embedded in text.
+//! Each extracted string is classified by the strongest matching heuristic:
+//! private-key blocks and well-known token formats, credential-named values,
+//! then credential assignments embedded in text.
 //! Every matcher is a bounded, ASCII case-insensitive byte heuristic that never
 //! retains the matched value. A file yields at most one finding, which names
-//! the first match's control labels (or type entry) and kind and counts
+//! the first match's labels (or type entry) and kind and counts
 //! the rest, but never repeats a stored value.
 
 use crate::config::RuleConfig;
@@ -15,7 +15,7 @@ use crate::rules::{Rule, Severity};
 /// Longest label text repeated in a finding message.
 const MAX_REPORTED_LABEL: usize = 64;
 
-/// Reports literal credentials stored in VI string defaults.
+/// Reports literal credentials stored in VI string defaults and constants.
 pub(super) struct HardcodedSecretDefault;
 
 impl Rule for HardcodedSecretDefault {
@@ -24,7 +24,7 @@ impl Rule for HardcodedSecretDefault {
     }
 
     fn description(&self) -> &'static str {
-        "Detect credentials stored in VI string defaults"
+        "Detect credentials stored in VI string defaults and constants"
     }
 
     fn default_severity(&self) -> Severity {
@@ -32,21 +32,41 @@ impl Rule for HardcodedSecretDefault {
     }
 
     fn check(&self, facts: &FileFacts, _options: Option<&RuleConfig>) -> Option<String> {
-        let mut matches = facts
+        let defaults = facts
             .default_string_values
-            .as_ref()?
             .iter()
-            .filter_map(|value| classify(value).map(|kind| (value, kind)));
-        let (value, kind) = matches.next()?;
-        let others = match matches.count() {
+            .flatten()
+            .filter_map(|value| classify(value).map(|kind| (location(value), kind, false)));
+        let constants = facts
+            .diagram_string_values
+            .iter()
+            .flatten()
+            .filter_map(|value| {
+                let kind = classify_content(&value.bytes, value.label.as_deref())?;
+                let location = match value.label.as_deref().filter(|label| !label.is_empty()) {
+                    Some(label) => format!("string constant \"{}\"", display_label(label)),
+                    None => "unlabeled string constant".to_owned(),
+                };
+                Some((location, kind, true))
+            });
+        let mut matches = defaults.chain(constants);
+        let (location, kind, first_is_constant) = matches.next()?;
+        let mut has_constant = first_is_constant;
+        let mut count = 0;
+        for (_, _, is_constant) in matches {
+            count += 1;
+            has_constant |= is_constant;
+        }
+        let other_kind = if has_constant { "value" } else { "default" };
+        let others = match count {
             0 => String::new(),
-            1 => " and 1 other default".to_owned(),
-            count => format!(" and {count} other defaults"),
+            1 => format!(" and 1 other {other_kind}"),
+            count => format!(" and {count} other {other_kind}s"),
         };
         Some(format!(
             "Possible hardcoded secret in {} ({}){others}. Remove it or load the secret securely at runtime.",
-            location(value),
-            kind.description(),
+            location,
+            kind.description(first_is_constant),
         ))
     }
 
@@ -60,16 +80,17 @@ impl Rule for HardcodedSecretDefault {
 enum SecretKind {
     PrivateKey,
     Token(&'static str),
-    CredentialControl,
+    CredentialName,
     Assignment,
 }
 
 impl SecretKind {
-    fn description(self) -> String {
+    fn description(self, is_constant: bool) -> String {
         match self {
             Self::PrivateKey => "private key block".to_owned(),
             Self::Token(name) => format!("{name} format"),
-            Self::CredentialControl => "credential-named control".to_owned(),
+            Self::CredentialName if is_constant => "credential-named constant".to_owned(),
+            Self::CredentialName => "credential-named control".to_owned(),
             Self::Assignment => "credential assignment in text".to_owned(),
         }
     }
@@ -77,15 +98,19 @@ impl SecretKind {
 
 /// Returns the strongest reason a default looks like a stored secret.
 fn classify(value: &DefaultStringValue) -> Option<SecretKind> {
-    let bytes = value.bytes.as_slice();
+    classify_content(&value.bytes, nearest_label(value))
+}
+
+/// Applies the same bounded matchers to either kind of stored string.
+fn classify_content(bytes: &[u8], label: Option<&[u8]>) -> Option<SecretKind> {
     if contains_private_key(bytes) {
         return Some(SecretKind::PrivateKey);
     }
     if let Some(name) = known_token(bytes) {
         return Some(SecretKind::Token(name));
     }
-    if nearest_label(value).is_some_and(is_credential_name) && is_plausible_secret(bytes) {
-        return Some(SecretKind::CredentialControl);
+    if label.is_some_and(is_credential_name) && is_plausible_secret(bytes) {
+        return Some(SecretKind::CredentialName);
     }
     contains_credential_assignment(bytes).then_some(SecretKind::Assignment)
 }
@@ -739,6 +764,7 @@ mod tests {
             terminal_icon_styles: None,
             connector_pane_pattern: None,
             default_string_values: Some(values),
+            diagram_string_values: Some(Vec::new()),
         }
     }
 
@@ -750,7 +776,7 @@ mod tests {
     fn reports_plausible_defaults_of_credential_named_controls() {
         assert_eq!(
             classify(&value(&[b"DB Password"], b"hunter22")),
-            Some(SecretKind::CredentialControl)
+            Some(SecretKind::CredentialName)
         );
         for (label, text) in [
             (b"DB Password".as_slice(), b"".as_slice()),
@@ -777,11 +803,11 @@ mod tests {
         );
         assert_eq!(
             classify(&value(&[b"Settings", b"", b"Password"], b"hunter22")),
-            Some(SecretKind::CredentialControl)
+            Some(SecretKind::CredentialName)
         );
         assert_eq!(
             classify(&value(&[b"Passwords", b""], b"hunter22")),
-            Some(SecretKind::CredentialControl)
+            Some(SecretKind::CredentialName)
         );
     }
 
@@ -798,7 +824,7 @@ mod tests {
         );
         assert_eq!(
             classify(&value(&[b"Password"], b"password=hunter22")),
-            Some(SecretKind::CredentialControl)
+            Some(SecretKind::CredentialName)
         );
         assert_eq!(
             unlabeled(b"password=hunter22"),
@@ -842,6 +868,37 @@ mod tests {
             unlabeled_message
                 .contains("in type entry 7, field 1.2 (credential assignment in text). ")
         );
+    }
+
+    #[test]
+    fn reports_labeled_and_unlabeled_diagram_constants_without_values() {
+        let mut facts = facts(Vec::new());
+        facts.diagram_string_values = Some(vec![
+            crate::formats::DiagramStringConstant {
+                label: Some(b"Password".to_vec()),
+                bytes: b"apiXSDsdsdadasdsdsadsadas".to_vec(),
+            },
+            crate::formats::DiagramStringConstant {
+                label: None,
+                bytes: b"password=another-secret".to_vec(),
+            },
+            crate::formats::DiagramStringConstant {
+                label: Some(b"Password".to_vec()),
+                bytes: b"changeme".to_vec(),
+            },
+        ]);
+        let message = HardcodedSecretDefault.check(&facts, None).unwrap();
+        assert_eq!(
+            message,
+            "Possible hardcoded secret in string constant \"Password\" (credential-named constant) and 1 other value. Remove it or load the secret securely at runtime."
+        );
+        assert!(!message.contains("apiXSDsdsdadasdsdsadsadas"));
+        assert!(!message.contains("another-secret"));
+
+        facts.diagram_string_values.as_mut().unwrap().remove(0);
+        let message = HardcodedSecretDefault.check(&facts, None).unwrap();
+        assert!(message.contains("unlabeled string constant (credential assignment in text)"));
+        assert!(!message.contains("another-secret"));
     }
 
     #[test]

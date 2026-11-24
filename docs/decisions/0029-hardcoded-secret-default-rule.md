@@ -12,9 +12,8 @@ matching to rule consumers. The rule must
 identify useful review candidates without exposing their values in terminal
 or CI reports, and without claiming to perform dataflow analysis.
 
-The current format reader does not map defaults to front-panel labels or read
-block-diagram string constants. The rule can therefore only evaluate the
-extracted string contents.
+The initial format reader did not map defaults to front-panel labels or read
+block-diagram string constants. Decisions 0030 and 0031 extend those inputs.
 
 ### Amendment (2026-11-23): label-aware matching
 
@@ -40,7 +39,7 @@ control; decision 0030 describes the front-panel name-label reader.
   does: in the last 256 bytes after the decoded properties, the first length
   byte whose printable text runs exactly to the descriptor's end. A missing
   label is empty, not an error.
-- Classify each default with the strongest matching heuristic:
+- Classify each default or scalar string constant with the strongest matching heuristic:
   1. PEM/PGP private-key headers, and fixed-prefix token formats with bounded
      character sets and word boundaries: AWS access key IDs, GitHub, GitLab,
      Slack, Google API, Stripe live keys, and signed JWTs.
@@ -94,8 +93,8 @@ control; decision 0030 describes the front-panel name-label reader.
 - **Report confidence tiers as separate severities or rules, with rule
   options and fingerprints for suppression:** deferred until findings from
   real projects show which tiers need different handling.
-- **Read block-diagram constants now:** deferred; the parser does not expose
-  them.
+- **Ignore block-diagram string constants:** rejected after a credential-named
+  constant demonstrated the gap; see decision 0031.
 - **Include matched values in findings:** rejected because reports are commonly
   shared with CI systems and reviewers; repeating a credential would increase
   its exposure.
@@ -109,8 +108,9 @@ Matching remains a heuristic: credential-like names with ordinary values can
 be false positives, and values shorter than four bytes or without a recognized
 name or format are missed. The finding message now contains user-chosen label
 text. Findings are review signals, not proof of exploitability. The rule only
-sees front-panel defaults supported by the current reader (decision 0030); it does not inspect
-diagram constants, other data types, or runtime dataflow.
+sees supported front-panel defaults (decision 0030) and scalar diagram string
+constants (decision 0031); it does not inspect composite diagram constants,
+other data types, or runtime dataflow.
 
 ## References
 
