@@ -136,5 +136,9 @@ rules:
     enabled: false
 ```
 
-The shared `#wirelint-ignore system-exec-command-input` suppression directive skips
-this rule's command-path extraction for that file.
+An unlinked `#wirelint-ignore system-exec-command-input` diagram directive
+suppresses this rule's findings for the file. Attach the comment arrow to one
+System Exec call node to suppress only that call's finding. An arrow to an input
+control does not suppress downstream calls. Command-path extraction still runs;
+neither form hides incomplete-analysis errors. See
+[object-scoped ignores](quality-rules.md#ignoring-one-object-with-a-comment-arrow).

@@ -121,6 +121,7 @@ mod tests {
     use super::*;
     fn value(kind: PathKind, constant: bool, components: &[&[u8]]) -> PathUsage {
         PathUsage {
+            object: None,
             label: None,
             constant,
             kind,

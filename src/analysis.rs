@@ -28,6 +28,7 @@ pub struct AnalysisError {
 pub struct Skipped {
     pub path: PathBuf,
     pub rule: &'static str,
+    pub object: Option<formats::ObjectId>,
 }
 
 /// Findings and errors accumulated in discovery/registry order.
@@ -117,21 +118,14 @@ pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Ru
                 read_connector_pane_pattern,
                 read_default_strings,
             )?;
-            if read_command_inputs
-                && !bookmarks
-                    .iter()
-                    .any(|bookmark| suppresses(bookmark, "system-exec-command-input"))
-            {
+            let directives = formats::read_directives(path, &bytes, bookmarks)?;
+            if read_command_inputs {
                 facts.system_exec_inputs = formats::read_system_exec_inputs(path, &bytes)?;
             }
-            if read_paths
-                && !bookmarks
-                    .iter()
-                    .any(|bookmark| suppresses(bookmark, "path-usage"))
-            {
+            if read_paths {
                 facts.path_usage = formats::read_path_usage(path, &bytes)?;
             }
-            Ok((facts, bookmarks))
+            Ok((facts, directives))
         });
         match result {
             Ok((facts, bookmarks)) => {
@@ -147,26 +141,8 @@ pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Ru
     if read_orphaned_vi {
         apply_orphaned_vi_facts(&mut analyzed_files);
     }
-    for (path, facts, bookmarks) in analyzed_files {
+    for (path, mut facts, bookmarks) in analyzed_files {
         for (rule, severity, options) in &active {
-            if bookmarks
-                .iter()
-                .any(|bookmark| suppresses(bookmark, rule.id()))
-            {
-                report.skipped.push(Skipped {
-                    path: path.clone(),
-                    rule: rule.id(),
-                });
-                continue;
-            }
-            if let Some(message) = rule.check(&facts, *options) {
-                report.findings.push(Finding {
-                    path: path.clone(),
-                    rule: rule.id(),
-                    severity: *severity,
-                    message,
-                });
-            }
             if rule.id() == "system-exec-command-input"
                 && let Some(inputs) = &facts.system_exec_inputs
                 && let Some((uid, reason)) = inputs.incomplete_calls.first()
@@ -179,9 +155,84 @@ pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Ru
                     ),
                 });
             }
+            if bookmarks
+                .iter()
+                .any(|bookmark| bookmark.object.is_none() && suppresses(&bookmark.text, rule.id()))
+            {
+                report.skipped.push(Skipped {
+                    path: path.clone(),
+                    rule: rule.id(),
+                    object: None,
+                });
+                continue;
+            }
+            let targets: std::collections::BTreeSet<_> = bookmarks
+                .iter()
+                .filter(|bookmark| suppresses(&bookmark.text, rule.id()))
+                .filter_map(|bookmark| bookmark.object)
+                .collect();
+            for object in targets {
+                if !matches!(
+                    rule.id(),
+                    "path-usage" | "hardcoded-secret-default" | "system-exec-command-input"
+                ) {
+                    report.errors.push(AnalysisError {
+                        path: path.clone(),
+                        message: format!("{}: object-scoped ignore is not supported for this rule; remove the arrow for a file-wide ignore", rule.id()),
+                    });
+                } else if suppress_object(&mut facts, rule.id(), object) {
+                    report.skipped.push(Skipped {
+                        path: path.clone(),
+                        rule: rule.id(),
+                        object: Some(object),
+                    });
+                }
+            }
+            if let Some(message) = rule.check(&facts, *options) {
+                report.findings.push(Finding {
+                    path: path.clone(),
+                    rule: rule.id(),
+                    severity: *severity,
+                    message,
+                });
+            }
         }
     }
     report
+}
+
+/// Removes only the named rule's source objects, before its message aggregation.
+///
+/// Incomplete analysis is never removed. A structure or a neighboring object
+/// has no implicit scope over descendants or dataflow.
+fn suppress_object(facts: &mut formats::FileFacts, rule: &str, object: formats::ObjectId) -> bool {
+    fn remove<T>(values: &mut Option<Vec<T>>, matches: impl Fn(&T) -> bool) -> bool {
+        let Some(values) = values else { return false };
+        let count = values.len();
+        values.retain(|value| !matches(value));
+        values.len() != count
+    }
+    match rule {
+        "path-usage" => remove(&mut facts.path_usage, |value| value.object == Some(object)),
+        "hardcoded-secret-default" => {
+            let defaults = remove(&mut facts.default_string_values, |value| {
+                value.object == Some(object)
+            });
+            let constants = remove(&mut facts.diagram_string_values, |value| {
+                value.object == Some(object)
+            });
+            defaults || constants
+        }
+        "system-exec-command-input" if object.heap == formats::SourceHeap::Diagram => {
+            let Some(inputs) = facts.system_exec_inputs.as_mut() else {
+                return false;
+            };
+            let count = inputs.influenced_calls.len();
+            inputs.influenced_calls.retain(|uid| *uid != object.uid);
+            inputs.influenced_calls.len() != count
+        }
+        _ => false,
+    }
 }
 
 /// Matches an exact two-token, ASCII rule directive; other bookmarks are inert.
@@ -190,7 +241,7 @@ fn suppresses(bookmark: &[u8], rule: &str) -> bool {
 }
 
 /// Resolves only relative VI/library URLs against files discovered in this scan.
-fn apply_orphaned_vi_facts(files: &mut [(PathBuf, formats::FileFacts, Vec<Vec<u8>>)]) {
+fn apply_orphaned_vi_facts(files: &mut [(PathBuf, formats::FileFacts, Vec<formats::Directive>)]) {
     let mut library_members = HashMap::<PathBuf, HashSet<PathBuf>>::new();
     for (library_path, facts, _) in files.iter() {
         let Some(members) = facts.library_members.as_ref() else {
@@ -241,8 +292,80 @@ fn resolve_scanned_path(base: &Path, path: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_scanned_path, suppresses};
+    use super::{resolve_scanned_path, suppress_object, suppresses};
+    use crate::formats::{self, ObjectId, SourceHeap};
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn object_ignores_do_not_cross_heaps_rules_or_incomplete_command_paths() {
+        let mut facts =
+            formats::read_facts(Path::new("test.lvproj"), b"<Project/>", false, false, false)
+                .unwrap();
+        let diagram = ObjectId {
+            heap: SourceHeap::Diagram,
+            uid: 10,
+        };
+        let panel = ObjectId {
+            heap: SourceHeap::FrontPanel,
+            uid: 10,
+        };
+        facts.diagram_string_values = Some(vec![
+            formats::DiagramStringConstant {
+                object: Some(diagram),
+                label: Some(b"same".to_vec()),
+                bytes: b"password=first".to_vec(),
+            },
+            formats::DiagramStringConstant {
+                object: Some(ObjectId { uid: 20, ..diagram }),
+                label: Some(b"same".to_vec()),
+                bytes: b"password=second".to_vec(),
+            },
+        ]);
+        facts.default_string_values = Some(vec![formats::DefaultStringValue {
+            object: Some(panel),
+            type_index: 1,
+            field_path: vec![0],
+            labels: vec![b"same".to_vec()],
+            bytes: b"password=default".to_vec(),
+        }]);
+        facts.system_exec_inputs = Some(formats::SystemExecInputs {
+            influenced_calls: vec![10, 20],
+            incomplete_calls: vec![(10, "unsupported transfer".to_owned())],
+        });
+        assert!(suppress_object(
+            &mut facts,
+            "hardcoded-secret-default",
+            diagram
+        ));
+        assert_eq!(facts.diagram_string_values.as_ref().unwrap().len(), 1);
+        assert_eq!(facts.default_string_values.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            facts.system_exec_inputs.as_ref().unwrap().influenced_calls,
+            [10, 20]
+        );
+        assert!(!suppress_object(
+            &mut facts,
+            "system-exec-command-input",
+            panel
+        ));
+        assert!(suppress_object(
+            &mut facts,
+            "system-exec-command-input",
+            diagram
+        ));
+        let inputs = facts.system_exec_inputs.as_ref().unwrap();
+        assert_eq!(inputs.influenced_calls, [20]);
+        assert_eq!(
+            inputs.incomplete_calls,
+            [(10, "unsupported transfer".to_owned())]
+        );
+        assert!(suppress_object(
+            &mut facts,
+            "hardcoded-secret-default",
+            panel
+        ));
+        assert!(facts.default_string_values.as_ref().unwrap().is_empty());
+    }
 
     #[test]
     fn matches_only_complete_rule_directives() {

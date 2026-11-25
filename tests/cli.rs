@@ -114,6 +114,18 @@ fn vi_with_diagram(
     password_hashes: Option<&[u8]>,
     heap: Option<&[u8]>,
 ) -> Vec<u8> {
+    vi_with_source_heaps(enabled, kind, description, password_hashes, heap, &[])
+}
+
+/// Builds independently populated block-diagram and front-panel source heaps.
+fn vi_with_source_heaps(
+    enabled: bool,
+    kind: &[u8; 4],
+    description: Option<&[u8]>,
+    password_hashes: Option<&[u8]>,
+    heap: Option<&[u8]>,
+    panel_heap: &[u8],
+) -> Vec<u8> {
     let description_size = description.map_or(0, |text| 8 + text.len());
     let password_record_offset = 72 + description_size;
     let password_size = password_hashes.map_or(0, |hashes| 4 + hashes.len());
@@ -128,7 +140,7 @@ fn vi_with_diagram(
         compressed
     };
     let diagram = heap.map(encode_heap);
-    let panel = encode_heap(&[]);
+    let panel = encode_heap(panel_heap);
     let diagram_offset = password_record_offset + password_size;
     let diagram_size = diagram.as_ref().map_or(0, |payload| 4 + payload.len());
     let panel_offset = diagram_offset + diagram_size;
@@ -272,17 +284,338 @@ fn path_usage_checks_saved_values_and_configured_targets() {
 /// `src/formats/heap.rs`, so integration tests can build minimal diagrams
 /// without exporting that encoder from the crate.
 fn heap_node(heap: &mut Vec<u8>, tag: i32, scope: u8, class: Option<i16>, content: &[u8]) {
+    heap_object(heap, tag, scope, class, None, content);
+}
+
+/// Encodes saved identities on definitions and classless UID references.
+fn heap_object(
+    heap: &mut Vec<u8>,
+    tag: i32,
+    scope: u8,
+    class: Option<i16>,
+    uid: Option<i16>,
+    content: &[u8],
+) {
     let tag = (tag + 31) as u16;
     let size = if content.is_empty() { 0 } else { 6 };
-    heap.push((size << 5) | (u8::from(class.is_some()) << 4) | (scope << 2) | (tag >> 8) as u8);
+    let attributes = class.is_some() || uid.is_some();
+    heap.push((size << 5) | (u8::from(attributes) << 4) | (scope << 2) | (tag >> 8) as u8);
     heap.push(tag as u8);
+    if attributes {
+        heap.push(u8::from(class.is_some()) + u8::from(uid.is_some()));
+    }
     if let Some(class) = class {
-        heap.extend_from_slice(&[1, 0xfe]);
+        heap.push(0xfe);
         heap.extend_from_slice(&class.to_be_bytes());
+    }
+    if let Some(uid) = uid {
+        heap.push(0xfd);
+        heap.extend_from_slice(&uid.to_be_bytes());
     }
     if !content.is_empty() {
         heap.push(content.len() as u8);
         heap.extend_from_slice(content);
+    }
+}
+
+/// Two offending scalar values and one harmless node, with a saved comment arrow.
+fn linked_ignore_heap(rule: &str, class: i16, data: &[u8], target: Option<i16>) -> Vec<u8> {
+    ignore_value_heap(rule, class, data, target, true)
+}
+
+/// Selects the native object classes and saved-value fields for each source heap.
+fn ignore_value_heap(
+    rule: &str,
+    class: i16,
+    data: &[u8],
+    target: Option<i16>,
+    diagram: bool,
+) -> Vec<u8> {
+    let mut heap = Vec::new();
+    heap_object(
+        &mut heap,
+        -7,
+        0,
+        Some(if diagram { 27 } else { 284 }),
+        Some(1),
+        &[],
+    );
+    heap_node(&mut heap, 303, 0, None, &[]);
+    heap_object(&mut heap, -6, 0, Some(10), Some(90), &[]);
+    heap_node(&mut heap, 270, 0, Some(1), &[]);
+    heap_node(
+        &mut heap,
+        3,
+        1,
+        None,
+        format!("#wirelint-ignore {rule}").as_bytes(),
+    );
+    heap_node(&mut heap, 270, 2, None, &[]);
+    heap_object(&mut heap, 619, 1, None, Some(92), &[]);
+    heap_node(&mut heap, -6, 2, None, &[]);
+    heap_object(&mut heap, -6, 0, Some(375), Some(92), &[]);
+    if let Some(uid) = target {
+        heap_object(&mut heap, 618, 1, None, Some(uid), &[]);
+    }
+    heap_node(&mut heap, -6, 2, None, &[]);
+    for (uid, label) in [
+        (10, b"Ignored value".as_slice()),
+        (20, b"Reported value".as_slice()),
+    ] {
+        heap_object(
+            &mut heap,
+            -6,
+            0,
+            Some(if diagram { 19 } else { 18 }),
+            Some(uid),
+            &[],
+        );
+        heap_node(&mut heap, 52, 0, Some(class), &[]);
+        heap_node(&mut heap, 194, 0, None, &[]);
+        heap_node(&mut heap, -6, 0, Some(10), &[]);
+        heap_node(&mut heap, 192, 1, None, &[16]);
+        heap_node(&mut heap, 270, 0, Some(1), &[]);
+        heap_node(&mut heap, 3, 1, None, label);
+        heap_node(&mut heap, 270, 2, None, &[]);
+        heap_node(&mut heap, -6, 2, None, &[]);
+        heap_node(&mut heap, 194, 2, None, &[]);
+        heap_node(&mut heap, 52, 2, None, &[]);
+        heap_node(&mut heap, if diagram { 589 } else { 571 }, 1, None, data);
+        heap_node(&mut heap, -6, 2, None, &[]);
+    }
+    heap_object(&mut heap, -6, 1, Some(28), Some(30), &[]);
+    heap_node(&mut heap, 303, 2, None, &[]);
+    heap_node(&mut heap, -7, 2, None, &[]);
+    heap
+}
+
+#[test]
+fn linked_bookmarks_filter_only_the_referenced_value_before_aggregation() {
+    let secret = b"password=fixture-only";
+    let mut string = (secret.len() as u32).to_be_bytes().to_vec();
+    string.extend_from_slice(secret);
+    for (command, rule, class, data) in [
+        (
+            "scan",
+            "path-usage",
+            91,
+            b"PTH0\0\0\0\x06\0\0\0\x01\x01C".as_slice(),
+        ),
+        ("sast", "hardcoded-secret-default", 81, string.as_slice()),
+    ] {
+        for (target, expected, other) in [
+            (Some(10), Some("Reported value"), false),
+            (Some(20), Some("Ignored value"), false),
+            (Some(30), Some("Ignored value"), true),
+            (None, None, false),
+        ] {
+            let directory = TestDirectory::new();
+            directory.write(
+                "linked.vi",
+                vi_with_diagram(
+                    true,
+                    b"LVIN",
+                    None,
+                    None,
+                    Some(&linked_ignore_heap(rule, class, data, target)),
+                ),
+            );
+            let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+                .arg(command)
+                .arg(&directory.0)
+                .args(["--verbose", "--fail-on", "warning"])
+                .output()
+                .unwrap();
+            assert!(
+                output.stderr.is_empty(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let finding = stdout
+                .lines()
+                .find(|line| line.contains(&format!("warning [{rule}]:")));
+            if let Some(expected) = expected {
+                let finding = finding.unwrap_or_else(|| panic!("{stdout}"));
+                assert!(finding.contains(expected), "{stdout}");
+                assert_eq!(finding.contains("other"), other, "{stdout}");
+                if !other {
+                    assert!(
+                        !finding.contains(if expected == "Reported value" {
+                            "Ignored value"
+                        } else {
+                            "Reported value"
+                        }),
+                        "{stdout}"
+                    );
+                }
+                assert_eq!(output.status.code(), Some(1));
+            } else {
+                assert!(finding.is_none(), "{stdout}");
+                assert!(
+                    stdout.contains(&format!(
+                        "linked.vi: skipped [{rule}] (#wirelint-ignore directive)"
+                    )),
+                    "{stdout}"
+                );
+            }
+            if matches!(target, Some(10 | 20)) {
+                assert!(
+                    stdout.contains(&format!(
+                        "skipped [{rule}] on BDHb object {}",
+                        target.unwrap()
+                    )),
+                    "{stdout}"
+                );
+            } else if target == Some(30) {
+                assert!(!stdout.contains(&format!("skipped [{rule}]")), "{stdout}");
+            }
+        }
+    }
+}
+
+#[test]
+fn front_panel_arrows_do_not_become_global_or_ignore_neighboring_values() {
+    let path = b"PTH0\0\0\0\x06\0\0\0\x01\x01C";
+    for (target, ignored) in [(Some(10), true), (Some(30), false), (None, false)] {
+        let directory = TestDirectory::new();
+        let panel = ignore_value_heap("path-usage", 91, path, target, false);
+        directory.write(
+            "panel.vi",
+            vi_with_source_heaps(true, b"LVIN", None, None, None, &panel),
+        );
+        let output = directory.scan(&["--verbose", "--fail-on", "warning"]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(
+            output.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let finding = stdout
+            .lines()
+            .find(|line| line.contains("warning [path-usage]:"))
+            .unwrap();
+        if ignored {
+            assert!(
+                finding.contains("Reported value")
+                    && !finding.contains("Ignored value")
+                    && !finding.contains("other"),
+                "{stdout}"
+            );
+            assert!(
+                stdout.contains("skipped [path-usage] on FPHb object 10"),
+                "{stdout}"
+            );
+        } else {
+            assert!(
+                finding.contains("Ignored value") && finding.contains("1 other path value(s)"),
+                "{stdout}"
+            );
+            assert!(!stdout.contains("skipped [path-usage]"), "{stdout}");
+        }
+    }
+}
+
+#[test]
+fn invalid_links_and_global_ignores_cannot_hide_analysis_errors() {
+    let path = b"PTH0\0\0\0\x06\0\0\0\x01\x01C";
+    for (rule, data, target, reason) in [
+        ("path-usage", path.as_slice(), Some(99), "arrow target"),
+        (
+            "saved-version",
+            path.as_slice(),
+            Some(10),
+            "object-scoped ignore is not supported",
+        ),
+        ("path-usage", &path[..10], None, "path"),
+    ] {
+        let directory = TestDirectory::new();
+        directory.write(
+            "broken.vi",
+            vi_with_diagram(
+                true,
+                b"LVIN",
+                None,
+                None,
+                Some(&linked_ignore_heap(rule, 91, data, target)),
+            ),
+        );
+        let output = directory.scan(&["--fail-on", "none"]);
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            stderr.contains("analysis error") && stderr.contains(reason),
+            "{stderr}"
+        );
+    }
+}
+
+#[test]
+fn saved_arrow_fixtures_leave_the_second_offending_object_visible() {
+    for (command, group, rule, file, remaining, ignored, scope) in [
+        (
+            "scan",
+            "quality",
+            "path-usage",
+            "linked-ignore.vi",
+            "Reported path",
+            "Ignored path",
+            "BDHb",
+        ),
+        (
+            "scan",
+            "quality",
+            "path-usage",
+            "linked-ignore-default.vi",
+            "Reported default",
+            "Ignored default",
+            "FPHb",
+        ),
+        (
+            "sast",
+            "sast",
+            "hardcoded-secret-default",
+            "linked-ignore.vi",
+            "Reported password",
+            "Ignored password",
+            "BDHb",
+        ),
+    ] {
+        let directory = TestDirectory::new();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join(group)
+            .join(rule)
+            .join(file);
+        directory.write("linked.vi", fs::read(fixture).unwrap());
+        let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+            .arg(command)
+            .arg(&directory.0)
+            .args(["--verbose", "--fail-on", "warning"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(
+            output.stderr.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let finding = stdout
+            .lines()
+            .find(|line| line.contains(&format!("warning [{rule}]:")))
+            .unwrap();
+        assert!(finding.contains(remaining), "{stdout}");
+        assert!(
+            !finding.contains(ignored) && !finding.contains("other"),
+            "{stdout}"
+        );
+        assert!(
+            stdout.contains(&format!("skipped [{rule}] on {scope} object")),
+            "{stdout}"
+        );
     }
 }
 
@@ -1609,7 +1942,11 @@ fn sast_reviews_only_control_influenced_system_exec_commands() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    for file in ["control-command.vi", "concatenate-command.vi"] {
+    for file in [
+        "control-command.vi",
+        "concatenate-command.vi",
+        "linked-ignore.vi",
+    ] {
         assert!(
             stdout.contains(&format!("{file}: warning [system-exec-command-input]")),
             "{stdout}"
@@ -1628,13 +1965,24 @@ fn sast_reviews_only_control_influenced_system_exec_commands() {
         "{stdout}"
     );
     assert!(
-        stdout.contains("2 finding(s); 0 analysis error(s)"),
+        stdout.lines().any(|line| line
+            .starts_with("linked-ignore.vi: warning [system-exec-command-input]")
+            && line.contains("(1 call(s))")),
+        "{stdout}"
+    );
+    assert!(
+        stdout
+            .contains("linked-ignore.vi: skipped [system-exec-command-input] on BDHb object 9200"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("3 finding(s); 0 analysis error(s)"),
         "{stdout}"
     );
     let report: serde_json::Value =
         serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
     let results = report["runs"][0]["results"].as_array().unwrap();
-    assert_eq!(results.len(), 2);
+    assert_eq!(results.len(), 3);
     assert!(
         results
             .iter()
@@ -1725,17 +2073,9 @@ fn sast_reports_unsupported_call_links_as_errors_unless_the_rule_is_disabled() {
         .arg(&directory.0)
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(output.stderr.is_empty());
-    assert!(
-        String::from_utf8(output.stdout)
-            .unwrap()
-            .contains("unsupported.vi: skipped [system-exec-command-input]")
-    );
+    assert_eq!(output.status.code(), Some(2));
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("unsupported LIbd link kind"), "{error}");
 
     directory.write("unsupported.vi", bytes);
     let config = directory.write(

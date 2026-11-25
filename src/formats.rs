@@ -11,11 +11,39 @@ mod xml;
 
 pub use command_input::SystemExecInputs;
 pub use heap::DiagramStringConstant;
+pub use heap::suppression::{Directive, ObjectId, SourceHeap};
 pub use path_usage::{PathKind, PathUsage};
 pub use typed_data::DefaultStringValue;
 
 use std::io;
 use std::path::{Path, PathBuf};
+
+/// Resolves VI comment arrows; XML description directives remain file-wide.
+///
+/// Invalid or ambiguous saved references return an analysis error, never a
+/// file-wide fallback. Unlinked front-panel labels do not supply directives.
+pub fn read_directives(
+    path: &Path,
+    bytes: &[u8],
+    bookmarks: Vec<Vec<u8>>,
+) -> io::Result<Vec<Directive>> {
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["lvproj", "lvlib", "lvclass"]
+                .iter()
+                .any(|kind| extension.eq_ignore_ascii_case(kind))
+        })
+    {
+        Ok(bookmarks
+            .into_iter()
+            .map(|text| Directive { text, object: None })
+            .collect())
+    } else {
+        rsrc::read_directives(bytes)
+    }
+}
 
 /// Extracts saved diagram topology on demand, without launching LabVIEW.
 ///
@@ -229,6 +257,64 @@ fn invalid(message: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_bookmark_arrows_identify_the_same_objects_as_value_extraction() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures");
+        for (group, rule) in [
+            ("quality", "path-usage"),
+            ("sast", "hardcoded-secret-default"),
+        ] {
+            let path = root.join(group).join(rule).join("linked-ignore.vi");
+            let bytes = std::fs::read(&path).unwrap();
+            let directives = read_directives(&path, &bytes, Vec::new()).unwrap();
+            let target = directives
+                .iter()
+                .find(|directive| directive_rule(&directive.text) == Some(rule.as_bytes()))
+                .unwrap()
+                .object
+                .unwrap();
+            if rule == "path-usage" {
+                let values = read_path_usage(&path, &bytes).unwrap().unwrap();
+                assert!(
+                    values.iter().any(|value| value.object == Some(target)),
+                    "target {target:?}; values {values:?}"
+                );
+            } else {
+                let facts = read_facts_with_orphaned_vi(
+                    &path, &bytes, false, false, false, false, false, true,
+                )
+                .unwrap()
+                .0;
+                let objects: Vec<_> = facts
+                    .diagram_string_values
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.object)
+                    .collect();
+                assert!(
+                    objects.contains(&Some(target)),
+                    "target {target:?}; objects {objects:?}"
+                );
+            }
+        }
+        let path = root
+            .join("sast")
+            .join("system-exec-command-input")
+            .join("linked-ignore.vi");
+        let bytes = std::fs::read(&path).unwrap();
+        let inputs = read_system_exec_inputs(&path, &bytes).unwrap().unwrap();
+        assert_eq!(inputs.influenced_calls, [9200, 9300]);
+        assert!(inputs.incomplete_calls.is_empty());
+        let directives = read_directives(&path, &bytes, Vec::new()).unwrap();
+        assert!(directives.iter().any(|directive| directive.object
+            == Some(ObjectId {
+                heap: SourceHeap::Diagram,
+                uid: 9200,
+            })));
+    }
 
     #[test]
     fn reads_owner_xml_properties_for_all_xml_extensions() {

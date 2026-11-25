@@ -9,6 +9,7 @@ use std::io;
 /// One scalar path value and the source object that owns it.
 #[derive(Clone, Debug)]
 pub struct PathUsage {
+    pub object: Option<super::ObjectId>,
     pub label: Option<Vec<u8>>,
     pub constant: bool,
     pub kind: PathKind,
@@ -83,6 +84,7 @@ pub(super) fn decode(data: &[u8], label: Option<Vec<u8>>, constant: bool) -> io:
         return Err(invalid("inconsistent flattened path components"));
     }
     Ok(PathUsage {
+        object: None,
         label,
         constant,
         kind,

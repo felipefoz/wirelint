@@ -30,8 +30,8 @@ pub struct Cli {
 enum Command {
     /// Run quality rules, including scalar path usage checks.
     #[command(
-        after_long_help = "The path-usage rule reports empty ordinary scalar path constants, absolute scalar paths, and invalid path syntax. Its targets option accepts windows and/or linux (default: both).",
-        long_about = "Recursively analyze .vi, .vit, .vim, .ctl, .lvproj, .lvclass, and .lvlib files (case-insensitive). Skip .llb archives and symbolic links below the root. A '#wirelint-ignore RULE-ID' directive in a VI block-diagram free label or on a standalone line in an XML file's own description skips that enabled rule for that file and is reported on stdout. Directive lines alone do not satisfy file-description. All built-in rules are enabled by default, including saved-version with a minimum saved LabVIEW version of 20.0 and no maximum. The class-mutation-history rule warns when an .lvclass contains mutation-history content in its NI.LVClass.Geneology XML property. The orphaned-vi rule resolves owner paths relative to the VI file and library member URLs relative to the library file. Library VI items without a URL attribute are skipped. The connector-pane-pattern rule skips global and polymorphic VIs without a connector pane. The auto-error-handling rule skips global and polymorphic VIs because they have no executable diagram of their own. Configure inclusive minimum-version and/or maximum-version bounds in YAML; a maximum-only configuration has no minimum. The debugging-status rule flags VIs with debugging enabled by default; set fail-when: disabled in YAML to reverse the check. The no-breakpoints rule reports VIs saved with block diagram breakpoints as errors by default. Print the scan type on stdout. Show summary totals and elapsed scan time by default; use --verbose for individual findings, without listing every discovered path. Elapsed time covers discovery and analysis, excluding configuration loading and final report rendering. Analysis errors always include file details. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error. Unsupported binary formats are errors, never passing checks."
+        after_long_help = "The path-usage rule reports empty ordinary scalar path constants, absolute scalar paths, and invalid path syntax. Its targets option accepts windows and/or linux (default: both). Attach a '#wirelint-ignore path-usage' free-label comment arrow to a constant or front-panel control/terminal to ignore only that object's values. Linked front-panel pane labels are supported; unlinked front-panel labels are inert. Invalid links and linked directives for VI-wide rules are analysis errors. Ignores never suppress analysis errors.",
+        long_about = "Recursively analyze .vi, .vit, .vim, .ctl, .lvproj, .lvclass, and .lvlib files (case-insensitive). Skip .llb archives and symbolic links below the root. An unlinked '#wirelint-ignore RULE-ID' directive in a VI block-diagram free label or on a standalone line in an XML file's own description skips that enabled rule's findings for that file and is reported on stdout. Directive lines alone do not satisfy file-description. All built-in rules are enabled by default, including saved-version with a minimum saved LabVIEW version of 20.0 and no maximum. The class-mutation-history rule warns when an .lvclass contains mutation-history content in its NI.LVClass.Geneology XML property. The orphaned-vi rule resolves owner paths relative to the VI file and library member URLs relative to the library file. Library VI items without a URL attribute are skipped. The connector-pane-pattern rule skips global and polymorphic VIs without a connector pane. The auto-error-handling rule skips global and polymorphic VIs because they have no executable diagram of their own. Configure inclusive minimum-version and/or maximum-version bounds in YAML; a maximum-only configuration has no minimum. The debugging-status rule flags VIs with debugging enabled by default; set fail-when: disabled in YAML to reverse the check. The no-breakpoints rule reports VIs saved with block diagram breakpoints as errors by default. Print the scan type on stdout. Show summary totals and elapsed scan time by default; use --verbose for individual findings, without listing every discovered path. Elapsed time covers discovery and analysis, excluding configuration loading and final report rendering. Analysis errors always include file details. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error. Unsupported binary formats are errors, never passing checks."
     )]
     Scan {
         /// Folder to scan.
@@ -55,6 +55,7 @@ enum Command {
     },
     /// Discover LabVIEW files and run enabled security analysis rules.
     #[command(
+        after_long_help = "A '#wirelint-ignore RULE-ID' free-label comment arrow suppresses only the linked string constant/control for hardcoded-secret-default, or the linked System Exec call node for system-exec-command-input. Unlinked diagram directives remain file-wide. Linked front-panel pane labels are supported; unlinked front-panel labels are inert. Invalid links are analysis errors. Ignores never suppress incomplete analysis or other analysis errors.",
         long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults and scalar block-diagram string constants for credentials (credential-named controls and constants, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. The system-exec-command-input rule reviews front-panel control influence on NI System Exec.vi command input through direct wires or Concatenate Strings. Calls alone and constant-only commands are not findings. Unsupported call-link layouts or command paths are analysis errors, even with --fail-on none. Findings mean 'needs review', not 'confirmed exploitable'. Use --format gitlab-sast to write a GitLab Security Report Schema report for artifacts:reports:sast. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
     )]
     Sast {
@@ -214,9 +215,13 @@ fn run_rules(
         }
     }
     for skipped in &report.skipped {
+        let scope = skipped
+            .object
+            .map(|object| format!(" on {} object {}", object.heap.name(), object.uid))
+            .unwrap_or_default();
         writeln!(
             output,
-            "{}: skipped [{}] (#wirelint-ignore directive)",
+            "{}: skipped [{}]{scope} (#wirelint-ignore directive)",
             skipped.path.display(),
             skipped.rule
         )?;
@@ -427,6 +432,8 @@ mod tests {
             "path-usage rule reports empty ordinary scalar path constants",
             "windows and/or linux",
             "#wirelint-ignore RULE-ID",
+            "comment arrow",
+            "Ignores never suppress analysis errors",
             "XML file's own description",
             "Directive lines alone do not satisfy file-description",
             "maximum-version",

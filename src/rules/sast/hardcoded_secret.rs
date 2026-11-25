@@ -741,6 +741,7 @@ mod tests {
 
     fn value(labels: &[&[u8]], bytes: &[u8]) -> DefaultStringValue {
         DefaultStringValue {
+            object: None,
             type_index: 3,
             field_path: vec![0; labels.len().saturating_sub(1)],
             labels: labels.iter().map(|label| label.to_vec()).collect(),
@@ -858,6 +859,7 @@ mod tests {
         let unlabeled_message = HardcodedSecretDefault
             .check(
                 &facts(vec![DefaultStringValue {
+                    object: None,
                     type_index: 7,
                     field_path: vec![1, 2],
                     labels: vec![Vec::new(); 3],
@@ -877,14 +879,17 @@ mod tests {
         let mut facts = facts(Vec::new());
         facts.diagram_string_values = Some(vec![
             crate::formats::DiagramStringConstant {
+                object: None,
                 label: Some(b"Password".to_vec()),
                 bytes: b"apiXSDsdsdadasdsdsadsadas".to_vec(),
             },
             crate::formats::DiagramStringConstant {
+                object: None,
                 label: None,
                 bytes: b"password=another-secret".to_vec(),
             },
             crate::formats::DiagramStringConstant {
+                object: None,
                 label: Some(b"Password".to_vec()),
                 bytes: b"changeme".to_vec(),
             },

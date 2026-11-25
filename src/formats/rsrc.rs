@@ -129,6 +129,64 @@ fn resources(bytes: &[u8]) -> io::Result<Resources<'_>> {
     })
 }
 
+/// Resolves directives in both source heaps after validating resource boundaries.
+pub(super) fn read_directives(bytes: &[u8]) -> io::Result<Vec<super::Directive>> {
+    let resources = resources(bytes)?;
+    if !resources.is_vi {
+        return Ok(Vec::new());
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut directives = Vec::new();
+    let mut panel = None;
+    let mut panel_targets = std::collections::BTreeSet::new();
+    for block in resources.table[4..resources.table_size].as_chunks::<12>().0 {
+        let source = match &block[..4] {
+            b"BDHb" => super::SourceHeap::Diagram,
+            b"FPHb" => super::SourceHeap::FrontPanel,
+            b"BDHP" | b"BDHc" | b"FPHP" | b"FPHc" => {
+                return Err(invalid("unsupported heap format for bookmark extraction"));
+            }
+            _ => continue,
+        };
+        if !seen.insert(source) {
+            return Err(invalid("duplicate source heap for bookmark extraction"));
+        }
+        let name = source.name();
+        let heap = super::heap::read_heap(
+            name,
+            resources.table,
+            resources.table_size,
+            resources.data,
+            number(block, 4)?,
+            number(block, 8)?,
+        )?;
+        let parsed = super::heap::suppression::parse(&heap, source)
+            .map_err(|error| invalid(format!("{name} bookmark: {error}")))?;
+        if source == super::SourceHeap::Diagram {
+            panel_targets.extend(
+                parsed
+                    .iter()
+                    .filter_map(|directive| directive.object)
+                    .filter(|object| object.heap == super::SourceHeap::FrontPanel)
+                    .map(|object| object.uid),
+            );
+        }
+        directives.extend(parsed);
+        if source == super::SourceHeap::FrontPanel {
+            panel = Some(heap);
+        }
+    }
+    if !panel_targets.is_empty() {
+        super::heap::suppression::validate_panel_targets(
+            panel
+                .as_deref()
+                .ok_or_else(|| invalid("missing front-panel heap for bookmark target"))?,
+            &panel_targets,
+        )?;
+    }
+    Ok(directives)
+}
+
 /// Reads scalar path objects from the saved source heaps, not compiled data.
 pub(super) fn read_path_usage(bytes: &[u8]) -> io::Result<Vec<super::PathUsage>> {
     let resources = resources(bytes)?;
@@ -1487,6 +1545,7 @@ mod tests {
         assert_eq!(
             facts.default_string_values,
             Some(vec![super::super::DefaultStringValue {
+                object: None,
                 type_index: 1,
                 field_path: Vec::new(),
                 labels: vec![b"Password".to_vec()],
@@ -1496,6 +1555,7 @@ mod tests {
         assert_eq!(
             facts.diagram_string_values,
             Some(vec![super::super::DiagramStringConstant {
+                object: None,
                 label: Some(b"API Key".to_vec()),
                 bytes: b"abc12345".to_vec(),
             }])

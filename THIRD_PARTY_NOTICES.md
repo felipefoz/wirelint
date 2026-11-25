@@ -79,6 +79,13 @@ and owned labels was checked against
 [lvkit](https://github.com/pragmatest-dev/lvkit)'s block-diagram parser. These were
 used as format descriptions; no implementation code or fixtures were copied.
 
+Object-scoped bookmark ignores use the `attachment` class and the `attachment`
+and `attachedObject` fields described in pylabview's `LVheap.py`. The saved
+label-to-attachment-to-object UID chain and the distinction between floating
+and arrowed comments were checked against labview-mcp's
+`docs/diagram-layout.md` and `docs/pylabview-comments.md`. These were consulted
+as format evidence; no implementation code or fixtures were copied.
+
 The `terminal-style` rule reuses that same `BDHb` heap reader,
 extended to also recognize `fPTerm` terminal objects. The class and field
 identifiers come from pylabview's `LVheap.py`: `SL_CLASS_TAGS.SL__fPTerm`

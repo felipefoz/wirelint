@@ -61,18 +61,51 @@ Add a free label to a VI's block diagram containing exactly:
 
 Replace `file-description` with any built-in rule ID. Matching is
 case-sensitive; the directive consists of two whitespace-separated tokens.
-Each directive skips that enabled rule for that file, even if it would otherwise
-pass. Repeated directives skip it only once. Other bookmarks, front-panel
-labels, owned labels, unknown rule IDs, and disabled rules have no effect.
+An unlinked diagram directive skips that enabled rule for that file, even if it
+would otherwise pass. Repeated directives skip it only once. Other bookmarks,
+unlinked front-panel labels, owned labels, unknown rule IDs, and disabled rules
+have no effect.
 Nested diagram free labels are included. Every skipped rule is printed with
 its file path on stdout, with or without `--verbose`; it does not contribute a
 finding or affect the failure threshold. CI reports contain findings, not skips.
 
-The reader supports compressed version-b (`BDHb`) diagram heaps. Binary files
-without a diagram cannot contain a directive; unsupported diagram heap formats,
+The reader supports compressed version-b (`BDHb` and `FPHb`) source heaps.
+Unsupported source heap formats,
 malformed heaps, or heaps over 64 MiB cause an analysis error. Controls cannot
 use these directives. Reading file facts still happens before rules are
 skipped, so a directive does not suppress format or I/O errors.
+
+### Ignoring one object with a comment arrow
+
+For `path-usage`, `hardcoded-secret-default`, and `system-exec-command-input`,
+use the same directive in a free label and attach its LabVIEW comment arrow to
+the object being exempted. WireLint resolves the saved attachment reference,
+not the label's position, name, or visual proximity.
+
+- Paths: point at the scalar constant or front-panel path control. A diagram
+  arrow to the control's terminal also exempts that control's saved default.
+- Secrets: point at the string constant or front-panel control. An exemption
+  on a control applies to all strings in its saved value, including nested
+  array/cluster fields; it does not exempt other controls.
+- System Exec: point at the particular call node, not its input control or
+  upstream string constant. Other calls remain analyzed.
+
+Linked front-panel free labels are supported in VI panes; unlinked front-panel
+labels do not create file-wide exceptions. Controls (`.ctl`) remain unsupported.
+Arrows to structures do not exempt their descendants, and arrows to harmless
+neighbors do not exempt nearby findings. Object ignores are applied before a
+rule counts and summarizes its remaining offending values.
+
+Applied object ignores are printed with the source heap and object UID, for
+example `skipped [path-usage] on BDHb object 123`. Duplicate directives for the
+same rule/object produce only one skip record.
+
+A dangling, ambiguous, or cross-diagram arrow is an analysis error, never a
+fallback to a file-wide ignore. A linked directive for an enabled VI-wide rule
+is also an analysis error: remove its arrow to request the existing file-wide
+behavior. Unknown and disabled rules do not produce skip records.
+Neither linked nor file-wide directives suppress malformed metadata or
+incomplete System Exec analysis.
 
 ### XML description directives
 

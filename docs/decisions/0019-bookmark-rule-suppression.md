@@ -11,6 +11,9 @@ XML projects, libraries, and classes have native descriptions but no diagrams.
 
 ## Decision
 
+Object-linked labels and extraction-error behavior are refined by
+[decision 0040](0040-object-scoped-bookmark-suppression.md).
+
 Read version-b block-diagram heaps from VI-family files and identify free
 labels structurally, including nested diagrams. Interpret an exact
 two-token `#wirelint-ignore RULE-ID` label as a per-VI suppression of that enabled

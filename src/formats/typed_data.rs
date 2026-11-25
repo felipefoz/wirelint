@@ -21,6 +21,8 @@ const MAX_LABEL_SEARCH: usize = 256;
 /// A raw string default and its location among the VI's front-panel controls.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DefaultStringValue {
+    /// Owning front-panel control, including for strings nested in its value.
+    pub object: Option<super::ObjectId>,
     /// One-based `VCTP` top-level type index of the control holding the value.
     pub type_index: usize,
     /// Cluster/array element indexes from the control's value to this string.
@@ -76,6 +78,9 @@ pub(super) fn read_default_strings(
             0,
         );
         if decoded.is_ok() && cursor == control.data.len() {
+            for value in &mut strings {
+                value.object = control.object;
+            }
             if let Some(label) = control.label.as_ref().filter(|label| !label.is_empty()) {
                 for value in &mut strings {
                     value.labels[0].clone_from(label);
@@ -182,6 +187,7 @@ fn walk_fill(
             let length = read_u32(data, cursor)?;
             let bytes = take(data, cursor, length)?.to_vec();
             output.push(DefaultStringValue {
+                object: None,
                 type_index: walk.type_index,
                 field_path: path.fields.clone(),
                 labels: path.labels.clone(),
@@ -414,6 +420,7 @@ mod tests {
 
     fn control(type_id: usize, data: Vec<u8>) -> ControlDefault {
         ControlDefault {
+            object: None,
             type_id,
             label: None,
             data,
@@ -450,6 +457,7 @@ mod tests {
         assert_eq!(
             values,
             vec![DefaultStringValue {
+                object: None,
                 type_index: 4,
                 field_path: Vec::new(),
                 labels: vec![b"DB Password".to_vec()],

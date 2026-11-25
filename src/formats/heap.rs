@@ -5,6 +5,7 @@
 //! dataflow or compiled code.
 
 pub(super) mod graph;
+pub(crate) mod suppression;
 
 use super::{invalid, rsrc};
 use flate2::bufread::ZlibDecoder;
@@ -93,6 +94,7 @@ pub(super) fn read_bdhb(
 /// A scalar diagram string constant's saved value and optional object label.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiagramStringConstant {
+    pub object: Option<super::ObjectId>,
     pub label: Option<Vec<u8>>,
     pub bytes: Vec<u8>,
 }
@@ -100,6 +102,7 @@ pub struct DiagramStringConstant {
 /// A front-panel control's stored default value, as kept in its heap object.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ControlDefault {
+    pub(super) object: Option<super::ObjectId>,
     /// One-based heap TypeID, resolved through `DTHP` into `VCTP`.
     pub(super) type_id: usize,
     /// Name label owned by this control's display object, when present.
@@ -133,7 +136,7 @@ pub(super) fn read_fphb(
 }
 
 /// Decompresses one version-b heap section and strips its length prefix.
-fn read_heap(
+pub(super) fn read_heap(
     name: &str,
     table: &[u8],
     table_size: usize,
@@ -374,6 +377,7 @@ impl NameLabel {
 /// Missing or malformed saved values are errors, never empty strings.
 fn parse_diagram_strings(bytes: &[u8]) -> io::Result<Vec<DiagramStringConstant>> {
     struct OpenConstant<'a> {
+        uid: Option<i32>,
         depth: usize,
         ddo_class: Option<i32>,
         ddo_seen: bool,
@@ -387,6 +391,7 @@ fn parse_diagram_strings(bytes: &[u8]) -> io::Result<Vec<DiagramStringConstant>>
     walk_heap(bytes, |stack, node, scope, content| {
         if node.class == Some(BD_CONST_DCO) && scope == Scope::Open {
             open.push(OpenConstant {
+                uid: node.uid,
                 depth: stack.len(),
                 ddo_class: None,
                 ddo_seen: false,
@@ -412,6 +417,10 @@ fn parse_diagram_strings(bytes: &[u8]) -> io::Result<Vec<DiagramStringConstant>>
                     return Err(invalid("string constant has trailing ConstValue data"));
                 }
                 strings.push(DiagramStringConstant {
+                    object: constant.uid.map(|uid| super::ObjectId {
+                        heap: super::SourceHeap::Diagram,
+                        uid,
+                    }),
                     label: constant.name.label,
                     bytes: value.to_vec(),
                 });
@@ -468,6 +477,7 @@ pub(super) fn read_paths(
 /// Collects only `stdPath` objects, excluding dedicated fixed constants.
 fn parse_paths(bytes: &[u8], diagram: bool) -> io::Result<Vec<super::PathUsage>> {
     struct OpenPath {
+        uid: Option<i32>,
         depth: usize,
         class: Option<i32>,
         ddo_seen: bool,
@@ -483,6 +493,7 @@ fn parse_paths(bytes: &[u8], diagram: bool) -> io::Result<Vec<super::PathUsage>>
     walk_heap(bytes, |stack, node, scope, content| {
         if node.class == Some(target) && scope == Scope::Open {
             open.push(OpenPath {
+                uid: node.uid,
                 depth: stack.len(),
                 class: None,
                 ddo_seen: false,
@@ -498,11 +509,19 @@ fn parse_paths(bytes: &[u8], diagram: bool) -> io::Result<Vec<super::PathUsage>>
                     return Err(invalid("duplicate path DDO or value"));
                 }
                 match object.data {
-                    Some(data) => paths.push(super::path_usage::decode(
-                        &data,
-                        object.name.label,
-                        diagram,
-                    )?),
+                    Some(data) => {
+                        let mut path =
+                            super::path_usage::decode(&data, object.name.label, diagram)?;
+                        path.object = object.uid.map(|uid| super::ObjectId {
+                            heap: if diagram {
+                                super::SourceHeap::Diagram
+                            } else {
+                                super::SourceHeap::FrontPanel
+                            },
+                            uid,
+                        });
+                        paths.push(path);
+                    }
                     None if diagram => return Err(invalid("path constant has no ConstValue")),
                     None => {}
                 }
@@ -535,6 +554,7 @@ fn parse_paths(bytes: &[u8], diagram: bool) -> io::Result<Vec<super::PathUsage>>
 /// Collects direct defaults and name labels of front-panel controls.
 fn parse_front_panel(bytes: &[u8]) -> io::Result<Vec<ControlDefault>> {
     struct OpenControl {
+        uid: Option<i32>,
         depth: usize,
         type_id: Option<usize>,
         data: Option<Vec<u8>>,
@@ -546,6 +566,7 @@ fn parse_front_panel(bytes: &[u8]) -> io::Result<Vec<ControlDefault>> {
         let is_control = node.tag == ARRAY_ELEMENT && node.class == Some(FP_DCO);
         match scope {
             Scope::Open if is_control => open.push(OpenControl {
+                uid: node.uid,
                 depth: stack.len(),
                 type_id: None,
                 data: None,
@@ -560,6 +581,10 @@ fn parse_front_panel(bytes: &[u8]) -> io::Result<Vec<ControlDefault>> {
                         .type_id
                         .ok_or_else(|| invalid("FPHb control default has no typeDesc"))?;
                     defaults.push(ControlDefault {
+                        object: control.uid.map(|uid| super::ObjectId {
+                            heap: super::SourceHeap::FrontPanel,
+                            uid,
+                        }),
                         type_id,
                         label: control.name.label,
                         data,
@@ -667,13 +692,32 @@ mod tests {
     use super::*;
 
     fn node(heap: &mut Vec<u8>, tag: i32, scope: u8, class: Option<i16>, content: &[u8]) {
+        node_with_uid(heap, tag, scope, class, None, content);
+    }
+
+    pub(super) fn node_with_uid(
+        heap: &mut Vec<u8>,
+        tag: i32,
+        scope: u8,
+        class: Option<i16>,
+        uid: Option<i16>,
+        content: &[u8],
+    ) {
         let tag = (tag + 31) as u16;
         let size = if content.is_empty() { 0 } else { 6 };
-        heap.push((size << 5) | (u8::from(class.is_some()) << 4) | (scope << 2) | (tag >> 8) as u8);
+        let attributes = class.is_some() || uid.is_some();
+        heap.push((size << 5) | (u8::from(attributes) << 4) | (scope << 2) | (tag >> 8) as u8);
         heap.push(tag as u8);
+        if attributes {
+            heap.push(u8::from(class.is_some()) + u8::from(uid.is_some()));
+        }
         if let Some(class) = class {
-            heap.extend_from_slice(&[1, 0xfe]);
+            heap.push(0xfe);
             heap.extend_from_slice(&class.to_be_bytes());
+        }
+        if let Some(uid) = uid {
+            heap.push(0xfd);
+            heap.extend_from_slice(&uid.to_be_bytes());
         }
         if !content.is_empty() {
             heap.push(content.len() as u8);
@@ -817,16 +861,19 @@ mod tests {
             parse_front_panel(&heap).unwrap(),
             vec![
                 ControlDefault {
+                    object: None,
                     type_id: 10,
                     label: None,
                     data: b"\0\0\0\x02pw".to_vec(),
                 },
                 ControlDefault {
+                    object: None,
                     type_id: 7,
                     label: None,
                     data: b"\0\0\0\x02in".to_vec(),
                 },
                 ControlDefault {
+                    object: None,
                     type_id: 261,
                     label: None,
                     data: b"\0\0\0\x03out".to_vec(),
@@ -940,10 +987,12 @@ mod tests {
             parse_diagram_strings(&heap).unwrap(),
             vec![
                 DiagramStringConstant {
+                    object: None,
                     label: Some(b"Password".to_vec()),
                     bytes: b"secret".to_vec()
                 },
                 DiagramStringConstant {
+                    object: None,
                     label: None,
                     bytes: b"token".to_vec()
                 },
