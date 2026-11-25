@@ -14,6 +14,9 @@ installable by a user without elevated privileges.
 Make the Windows MSI per-user only. Install by default under
 `%LOCALAPPDATA%\Programs\wirelint` and add the executable's `bin` directory to
 the installing user's PATH. Do not offer a per-system install option initially.
+Maintain the customized WiX template locally and configure cargo-dist with
+`allow-dirty = ["msi"]`, so release planning does not reject the per-user
+changes or regenerate the default per-machine installer.
 
 ## Alternatives
 
@@ -30,3 +33,5 @@ the installing user's PATH. Do not offer a per-system install option initially.
 - MSI upgrades apply within the same per-user installation context. Existing
   per-system installations may need to be removed before installing the
   per-user MSI.
+- cargo-dist no longer checks the MSI template against generated defaults.
+  Review and update it manually when package metadata or cargo-dist changes.
