@@ -18,3 +18,9 @@ rules:
   hardcoded-secret-default:
     enabled: true
     severity: warning
+
+  # Review front-panel control influence on NI System Exec's command line.
+  # Supports direct wires and Concatenate Strings; unknown paths are errors.
+  system-exec-command-input:
+    enabled: true
+    severity: warning

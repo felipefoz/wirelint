@@ -52,11 +52,14 @@ The `debugging-status` rule flags debugging-enabled VIs by default.
 Set its YAML option `fail-when: disabled` to flag the opposite state.
 The `saved-version` rule accepts inclusive `minimum-version` and
 `maximum-version` YAML options. Setting only a maximum applies no minimum.
-`sast` uses a separate rule registry and configuration; its initial
+`sast` uses a separate rule registry and configuration. Its
 `hardcoded-secret-default` rule flags credentials stored in VI string
 defaults and scalar diagram string constants: values of credential-named
 controls or constants, key/value assignments, URL credentials, private keys,
-and well-known token formats. SAST findings
+and well-known token formats. `system-exec-command-input` reviews front-panel
+control influence on NI System Exec's command line through direct wires or
+Concatenate Strings. Unsupported command paths are analysis errors, not
+passing checks. SAST findings
 indicate content that needs review, not confirmed
 exploitable vulnerabilities. See the
 [security rule reference](sast-rules.md#hardcoded-secret-default).

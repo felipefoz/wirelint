@@ -140,6 +140,7 @@ pub(super) fn read_facts_with_members(
     });
     Ok((
         FileFacts {
+            system_exec_inputs: None,
             separate_compiled_code: value.unwrap_or(false),
             has_description,
             saved_version,

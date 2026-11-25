@@ -167,6 +167,89 @@ pub(super) fn read_diagram_graph(
     Ok(graph)
 }
 
+/// Resolves static call identities before paying to construct a source graph.
+///
+/// Only modern IUVI links are supported. Unknown link records are errors because
+/// records are not length-framed and cannot be skipped reliably.
+pub(super) fn read_system_exec_inputs(bytes: &[u8]) -> io::Result<Option<super::SystemExecInputs>> {
+    let resources = resources(bytes)?;
+    if !resources.is_vi {
+        return Ok(None);
+    }
+    let mut links = None;
+    let mut version = None;
+    for block in resources.table[4..resources.table_size].as_chunks::<12>().0 {
+        match &block[..4] {
+            b"LIbd" => {
+                if links.is_some() {
+                    return Err(invalid("duplicate LIbd call-link block"));
+                }
+                links = Some(single_payload(&resources, block)?);
+            }
+            b"LVSR" => {
+                if version.is_some() {
+                    return Err(invalid("duplicate LVSR save record"));
+                }
+                let payload = single_payload(&resources, block)?;
+                let word = u32::from_be_bytes(slice(payload, 0, 4)?.try_into().unwrap());
+                version = Some(Version::from_word(word)?);
+            }
+            _ => {}
+        }
+    }
+    let Some(links) = links else {
+        return Ok(Some(super::SystemExecInputs::default()));
+    };
+    if version.is_none_or(|version| version.major < 14) {
+        return Err(invalid(
+            "LIbd command analysis requires saved LabVIEW 14.0 or newer",
+        ));
+    }
+    let links = super::call_links::parse(links)
+        .map_err(|error| invalid(format!("LIbd call links: {error}")))?;
+    let mut calls = std::collections::BTreeMap::new();
+    for link in links {
+        let is_system_exec = super::command_input::is_system_exec(&link);
+        for uid in link.nodes {
+            if calls.insert(uid, is_system_exec).is_some() {
+                return Err(invalid("duplicate call-node identity in LIbd"));
+            }
+        }
+    }
+    let calls = calls
+        .into_iter()
+        .filter_map(|(uid, matches)| matches.then_some(uid))
+        .collect::<Vec<_>>();
+    if calls.is_empty() {
+        return Ok(Some(super::SystemExecInputs::default()));
+    }
+    let graph = super::read_diagram_graph(bytes)?;
+    Ok(Some(super::command_input::analyze(graph.as_ref(), &calls)))
+}
+
+/// Reads one section-zero payload without accepting a table overlap or alias.
+fn single_payload<'a>(resources: &Resources<'a>, block: &[u8]) -> io::Result<&'a [u8]> {
+    let offset = number(block, 8)?;
+    if number(block, 4)? != 0 || offset < resources.table_size {
+        return Err(invalid(
+            "unsupported command-analysis resource section table",
+        ));
+    }
+    let section = slice(resources.table, offset, 20)?;
+    if number(section, 0)? != 0 {
+        return Err(invalid(
+            "unsupported command-analysis resource section index",
+        ));
+    }
+    let record_offset = number(section, 12)?;
+    let record = slice(
+        resources.data,
+        record_offset,
+        resources.data.len().saturating_sub(record_offset),
+    )?;
+    slice(record, 4, number(record, 0)?)
+}
+
 /// Extracts an owning-library path when orphaned-VI analysis is requested.
 pub(super) fn read_facts_with_orphaned_vi(
     bytes: &[u8],
@@ -386,6 +469,7 @@ pub(super) fn read_facts_with_orphaned_vi(
     };
     Ok((
         FileFacts {
+            system_exec_inputs: None,
             separate_compiled_code,
             has_description,
             saved_version,
@@ -485,7 +569,7 @@ fn read_vilb_path(payload: &[u8]) -> io::Result<Option<PathBuf>> {
 }
 
 /// Decodes a bounded PTH0 record without interpreting absolute/token paths.
-fn read_pth0(payload: &[u8], offset: usize) -> io::Result<(u16, Vec<String>)> {
+pub(super) fn read_pth0(payload: &[u8], offset: usize) -> io::Result<(u16, Vec<String>)> {
     if slice(payload, offset, 4)? != b"PTH0" {
         return Err(invalid("expected PTH0 path record"));
     }

@@ -155,6 +155,13 @@ connections, fan-out and structure boundaries. These were consulted as format
 descriptions. Tests use synthetic data and existing project-owned VIs;
 no implementation code or external fixtures were copied.
 
+The System Exec command-input reader also consults pylabview's `LinkObjRefs`
+in `LVblock.py`, the IUVI basic/typed/offset link layouts in `LVlinkinfo.py`,
+and qualified-name/type-index encodings in `LVmisc.py`. labview-mcp's
+`experiments/aixml-without-grpc/FINDINGS.md` section 4a describes saved subVI
+slots and terminal flags. These are format references, not copied code.
+System Exec caller fixtures are original WireLint diagrams.
+
 ## Rust dependencies
 
 WireLint uses Clap for the CLI, flate2 for zlib decompression, roxmltree for

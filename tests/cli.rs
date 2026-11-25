@@ -1497,6 +1497,195 @@ fn sast_reports_control_defaults_in_separated_and_embedded_vis() {
 }
 
 #[test]
+fn sast_reviews_only_control_influenced_system_exec_commands() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sast")
+        .join("system-exec-command-input");
+    let directory = TestDirectory::new();
+    let config = directory.write(
+        "sast.yaml",
+        "rules:\n  hardcoded-secret-default:\n    enabled: false\n",
+    );
+    let report_path = directory.0.join("report.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&fixtures)
+        .arg("--config")
+        .arg(&config)
+        .args([
+            "--verbose",
+            "--fail-on",
+            "warning",
+            "--format",
+            "sarif",
+            "--output",
+        ])
+        .arg(&report_path)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for file in ["control-command.vi", "concatenate-command.vi"] {
+        assert!(
+            stdout.contains(&format!("{file}: warning [system-exec-command-input]")),
+            "{stdout}"
+        );
+    }
+    for file in [
+        "constant-command.vi",
+        "constant-concatenate-command.vi",
+        "unwired-system-exec.vi",
+        "control-other-input.vi",
+    ] {
+        assert!(!stdout.contains(&format!("{file}:")), "{stdout}");
+    }
+    assert!(
+        stdout.contains("suppressed-control-command.vi: skipped [system-exec-command-input]"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("2 finding(s); 0 analysis error(s)"),
+        "{stdout}"
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+    let results = report["runs"][0]["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(
+        results
+            .iter()
+            .all(|result| result["ruleId"] == "system-exec-command-input")
+    );
+
+    fs::write(
+        &config,
+        "rules:\n  hardcoded-secret-default:\n    enabled: false\n  system-exec-command-input:\n    enabled: false\n",
+    )
+    .unwrap();
+    let disabled = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&fixtures)
+        .arg("--config")
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert!(disabled.status.success());
+    assert!(disabled.stderr.is_empty());
+    assert!(
+        String::from_utf8(disabled.stdout)
+            .unwrap()
+            .contains("0 finding(s)")
+    );
+}
+
+#[test]
+fn sast_reports_unsupported_call_links_as_errors_unless_the_rule_is_disabled() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sast")
+        .join("system-exec-command-input")
+        .join("control-command.vi");
+    let mut bytes = fs::read(&path).unwrap();
+    let offsets = bytes
+        .windows(4)
+        .enumerate()
+        .filter_map(|(offset, value)| (value == b"IUVI").then_some(offset))
+        .collect::<Vec<_>>();
+    assert_eq!(offsets.len(), 1);
+    bytes[offsets[0]..offsets[0] + 4].copy_from_slice(b"ZZZZ");
+    let directory = TestDirectory::new();
+    directory.write("unsupported.vi", &bytes);
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&directory.0)
+        .args(["--fail-on", "none"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("unsupported.vi: analysis error:"), "{error}");
+    assert!(error.contains("unsupported LIbd link kind"), "{error}");
+
+    let mut unresolved = fs::read(&path).unwrap();
+    let node_offset = unresolved
+        .windows(12)
+        .position(|value| value == b"\0\0\0\x01\0\0\x10\x6BPTH0")
+        .unwrap()
+        + 4;
+    unresolved[node_offset..node_offset + 4].copy_from_slice(&i32::MAX.to_be_bytes());
+    directory.write("unsupported.vi", unresolved);
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&directory.0)
+        .args(["--fail-on", "none"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        error.contains("incomplete analysis of 1 call(s)"),
+        "{error}"
+    );
+    assert!(error.contains("linked call node is missing"), "{error}");
+
+    let mut suppressed = fs::read(path.with_file_name("suppressed-control-command.vi")).unwrap();
+    let offset = suppressed
+        .windows(4)
+        .position(|value| value == b"IUVI")
+        .unwrap();
+    suppressed[offset..offset + 4].copy_from_slice(b"ZZZZ");
+    directory.write("unsupported.vi", suppressed);
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&directory.0)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("unsupported.vi: skipped [system-exec-command-input]")
+    );
+
+    directory.write("unsupported.vi", bytes);
+    let config = directory.write(
+        "sast.yaml",
+        "rules:\n  system-exec-command-input:\n    enabled: false\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("sast")
+        .arg(&directory.0)
+        .arg("--config")
+        .arg(config)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn sast_writes_a_gitlab_security_report() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sast");
     let directory = TestDirectory::new();
@@ -1573,6 +1762,7 @@ fn lists_rules_and_handles_an_empty_folder() {
     assert!(rules.contains("auto-error-handling [scan, error]"));
     assert!(rules.contains("password-set [scan, warning]"));
     assert!(rules.contains("hardcoded-secret-default [sast, warning] (CWE-798, CWE-259)"));
+    assert!(rules.contains("system-exec-command-input [sast, warning] (CWE-78, CWE-88)"));
     let directory = TestDirectory::new();
     for args in [vec![], vec!["--verbose"]] {
         let output = directory.scan(&args);

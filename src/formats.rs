@@ -1,11 +1,14 @@
 //! Shared facts and dispatch for native VI/RSRC and XML LabVIEW formats.
 
+mod call_links;
+mod command_input;
 mod connector;
 mod heap;
 mod rsrc;
 mod typed_data;
 mod xml;
 
+pub use command_input::SystemExecInputs;
 pub use heap::DiagramStringConstant;
 pub use typed_data::DefaultStringValue;
 
@@ -16,15 +19,24 @@ use std::path::{Path, PathBuf};
 ///
 /// Missing source is `None`; unresolved connections are graph issues, not proof
 /// of safety. This foundation does not resolve callees or perform taint analysis.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Opt-in substrate for the upcoming command-input rule"
-    )
-)]
 pub fn read_diagram_graph(bytes: &[u8]) -> io::Result<Option<heap::graph::DiagramGraph>> {
     rsrc::read_diagram_graph(bytes)
+}
+
+/// Extracts local command-input evidence only for VI-family binary resources.
+///
+/// Unsupported link layouts and malformed resources are analysis errors.
+/// XML documents and controls do not have an executable caller diagram.
+pub fn read_system_exec_inputs(path: &Path, bytes: &[u8]) -> io::Result<Option<SystemExecInputs>> {
+    let extension = path.extension().and_then(|extension| extension.to_str());
+    if !extension.is_some_and(|extension| {
+        ["vi", "vit", "vim"]
+            .iter()
+            .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+    }) {
+        return Ok(None);
+    }
+    rsrc::read_system_exec_inputs(bytes)
 }
 
 /// LabVIEW major and minor release numbers, ordered numerically.
@@ -74,6 +86,8 @@ impl std::fmt::Display for Version {
 /// Facts shared by all rules; extracted once for each analyzed file.
 #[derive(Debug)]
 pub struct FileFacts {
+    /// Local command-input evidence, only extracted for the System Exec rule.
+    pub system_exec_inputs: Option<SystemExecInputs>,
     pub separate_compiled_code: bool,
     pub has_description: Option<bool>,
     pub saved_version: Option<Version>,

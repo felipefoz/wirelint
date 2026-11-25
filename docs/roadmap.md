@@ -39,16 +39,14 @@ decisions are omitted.
 
 ## Security analysis
 
-- **Local dataflow/taint tracing (Tier 2a):** trace a value across wires
-  within one block diagram, for example OS command injection or path
-  traversal where the tainted string and the sink are in the same VI. Needs
-  validated direction, node transfer and structure-boundary semantics beyond
-  the opt-in structural graph reader in
-  [decision 0036](decisions/0036-diagram-graph-reader.md). The reader preserves
-  terminal-UID nets and explicit unresolved connections; it does not yet
-  resolve callees or perform taint analysis. `System Exec.vi` command-input
-  analysis is a priority independent of tier ordering. See
-  [decision 0026](decisions/0026-security-analysis-command-and-rules.md).
+- **Broader local dataflow/taint tracing (Tier 2a):** extend the initial
+  System Exec command-input rule beyond direct controls, constants and
+  Concatenate Strings. Add saved fixtures and transfer semantics for format
+  functions, structure tunnels and additional external sources; expand static
+  call-link coverage. Unsupported paths currently produce analysis errors.
+  The opt-in graph foundation is described in
+  [decision 0036](decisions/0036-diagram-graph-reader.md), and the initial rule in
+  [decision 0037](decisions/0037-system-exec-command-input.md).
 - **Interprocedural dataflow/taint tracing (Tier 2b):** trace a value across
   subVI call boundaries using a project-wide call graph, for example SQL
   injection or insecure deserialization where the tainted source and the sink

@@ -43,3 +43,21 @@ should produce an auto-error-handling finding.
 The orphaned-vi `url-less-items` fixture is a synthetic library containing
 both an unsaved VI item without a URL and a normal member URL. The URL-less
 item should not cause an analysis error or discard the normal member.
+
+The System Exec callers are original diagrams saved by LabVIEW 2024.
+**Do not run these VIs:** their command strings are test data for static
+analysis, and the callers were never executed during fixture creation.
+
+| Caller in `sast/system-exec-command-input/` | Expected rule result |
+| --- | --- |
+| `constant-command.vi` | No warning |
+| `constant-concatenate-command.vi` | No warning |
+| `control-command.vi` | Warning |
+| `concatenate-command.vi` | Warning |
+| `control-other-input.vi` | No warning; control feeds standard input only |
+| `unwired-system-exec.vi` | No warning; intentionally broken required command input |
+| `suppressed-control-command.vi` | Rule skipped by a diagram directive |
+
+These callers use NI's `<vilib>/Platform/system.llb/System Exec.vi`. The
+saved command slot is 11, while standard input is 10. Tests inspect these
+files without needing the NI library or launching LabVIEW.

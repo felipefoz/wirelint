@@ -2,7 +2,8 @@
 
 Security rules run with `wirelint sast` and are listed separately from the
 quality and source-control hygiene rules used by `wirelint scan`. They read
-stored facts from LabVIEW files; they do not trace block-diagram dataflow.
+stored facts from LabVIEW files. The System Exec rule follows a limited set
+of local block-diagram connections.
 Findings are review signals, not confirmation of exploitability.
 
 All SAST rules are enabled by default and use the shared `enabled` and
@@ -13,6 +14,7 @@ All SAST rules are enabled by default and use the shared `enabled` and
 ## Rules
 
 - [hardcoded-secret-default](#hardcoded-secret-default)
+- [system-exec-command-input](#system-exec-command-input)
 
 ## `hardcoded-secret-default`
 
@@ -84,3 +86,55 @@ format are not reported.
 Rule suppression directives are shared across commands. Their syntax and
 limitations are documented in the
 [quality and hygiene rule reference](quality-rules.md#skipping-a-rule-with-a-bookmark).
+
+## `system-exec-command-input`
+
+Reports front-panel control influence on the command line of NI's
+`System Exec.vi`, directly or through Concatenate Strings.
+
+| Setting | Value |
+| --- | --- |
+| Default enablement | Enabled |
+| Default severity | `warning` |
+| CWE | CWE-78, CWE-88 |
+| Applies to | VI-family resources (`.vi`, `.vit`, `.vim`) |
+| Rule-specific options | None |
+
+A call alone is not reported. Constant-only command construction, unrelated
+controls, controls connected only to standard input and unwired command
+inputs do not produce this warning. Concatenation does not sanitize a value.
+Findings do not repeat command strings or control defaults.
+
+Review who can influence the control, the executable being invoked, shell
+use and argument parsing on the target operating system. Prefer a fixed
+executable and allowlisted argument choices. The warning is not proof of
+an exploitable vulnerability, and constant commands are not certified safe.
+
+The rule resolves static calls through modern `LIbd/IUVI` links (saved
+LabVIEW 14.0 or newer) and reads version-b diagram source heaps. It does not
+load the referenced NI library or execute a command. A custom VI with the
+same basename outside NI's platform library does not match.
+
+Supported sources are front-panel controls and diagram constants; the
+supported transfer operation is Concatenate Strings. Other subVIs,
+primitives, format functions, structure tunnels, variables, property nodes
+and dynamic calls are not traced. Network/file input is not classified as
+a source in this version. No sanitizer recognition is implemented.
+
+For recognized calls, an unsupported or ambiguous command path produces an
+analysis error and exit status 2, even with `--fail-on none`. Missing source
+also produces an error when a matching call link exists. Unsupported link
+record kinds are errors because they cannot be reliably skipped; this can
+affect files without a known System Exec call. No matching static call link
+means no finding, not a security guarantee.
+
+Disable the rule through YAML if its current format coverage is unsuitable:
+
+```yaml
+rules:
+  system-exec-command-input:
+    enabled: false
+```
+
+The shared `#wirelint system-exec-command-input` suppression directive skips
+this rule's command-path extraction for that file.

@@ -100,10 +100,13 @@ pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Ru
     let read_default_strings = active
         .iter()
         .any(|(rule, _, _)| rule.id() == "hardcoded-secret-default");
+    let read_command_inputs = active
+        .iter()
+        .any(|(rule, _, _)| rule.id() == "system-exec-command-input");
     let mut analyzed_files = Vec::new();
     for path in files {
         let result = fs::read(root.join(path)).and_then(|bytes| {
-            formats::read_facts_with_orphaned_vi(
+            let (mut facts, bookmarks) = formats::read_facts_with_orphaned_vi(
                 path,
                 &bytes,
                 read_version,
@@ -112,7 +115,15 @@ pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Ru
                 read_orphaned_vi,
                 read_connector_pane_pattern,
                 read_default_strings,
-            )
+            )?;
+            if read_command_inputs
+                && !bookmarks
+                    .iter()
+                    .any(|bookmark| suppresses(bookmark, "system-exec-command-input"))
+            {
+                facts.system_exec_inputs = formats::read_system_exec_inputs(path, &bytes)?;
+            }
+            Ok((facts, bookmarks))
         });
         match result {
             Ok((facts, bookmarks)) => {
@@ -146,6 +157,18 @@ pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Ru
                     rule: rule.id(),
                     severity: *severity,
                     message,
+                });
+            }
+            if rule.id() == "system-exec-command-input"
+                && let Some(inputs) = &facts.system_exec_inputs
+                && let Some((uid, reason)) = inputs.incomplete_calls.first()
+            {
+                report.errors.push(AnalysisError {
+                    path: path.clone(),
+                    message: format!(
+                        "system-exec-command-input: incomplete analysis of {} call(s); node {uid}: {reason}",
+                        inputs.incomplete_calls.len()
+                    ),
                 });
             }
         }
