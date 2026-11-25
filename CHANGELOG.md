@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-11-25
+
+### Added
+
+- Add sast command and security rule architecture
+- Add security analysis command and rule registry
+- Add hardcoded-secret-default rule
+- Add GitLab SAST report support
+- Add structural diagram graph reader
+- Add path usage rule
+
+### Changed
+
+- Parse VI typed default strings
+- Separate quality and security modules
+- Match secrets by control label and known formats
+- Merge branch 'main' of https://github.com/felipefoz/wire-lint
+- Scan diagram string constants
+- Investigate diagram connectivity
+- Detect control-influenced System Exec commands
+- Rename directive to wirelint-ignore
+- Bump to beta version v0.3.0
+- Update to v0.3.1
+- Update installer config and bump new version
+
+### Fixed
+
+- Install per user without elevation
+- Read control defaults from the front-panel heap
+- Resolve library member URLs
+- Organize fixtures by rule
+- Resolve VI owner paths
+- Skip pane-less VI connector patterns
+- Skip automatic error handling on non-executable VIs
+- Skip library VI items without URLs
+- Warn on automatic error handling by default
+- Scope linked bookmark ignores to their targets
+- Preserve customized per-user MSI
+
 ## [0.2.0] - 2026-11-20
 
 ### Added
@@ -58,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove sandbox fixture dependencies
 
+[0.3.2]: https://github.com/felipefoz/wirelint/compare/v0.2.0..v0.3.2
 [0.2.0]: https://github.com/felipefoz/wirelint/compare/v0.1.0..v0.2.0
 [0.1.0]: https://github.com/felipefoz/wirelint/tree/v0.1.0
 
