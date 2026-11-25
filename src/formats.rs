@@ -12,6 +12,21 @@ pub use typed_data::DefaultStringValue;
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// Extracts saved diagram topology on demand, without launching LabVIEW.
+///
+/// Missing source is `None`; unresolved connections are graph issues, not proof
+/// of safety. This foundation does not resolve callees or perform taint analysis.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "Opt-in substrate for the upcoming command-input rule"
+    )
+)]
+pub fn read_diagram_graph(bytes: &[u8]) -> io::Result<Option<heap::graph::DiagramGraph>> {
+    rsrc::read_diagram_graph(bytes)
+}
+
 /// LabVIEW major and minor release numbers, ordered numerically.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Version {

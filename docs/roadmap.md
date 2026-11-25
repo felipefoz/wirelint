@@ -42,11 +42,12 @@ decisions are omitted.
 - **Local dataflow/taint tracing (Tier 2a):** trace a value across wires
   within one block diagram, for example OS command injection or path
   traversal where the tainted string and the sink are in the same VI. Needs
-  a block-diagram wire/node graph model WireLint does not have yet, beyond
-  the bounded `BDHb` heap reads used today. Initial investigation confirmed
-  terminal-UID signal connections and a subVI call-to-`LIbd` link, but not a
-  complete graph reader. `System Exec.vi` command-input analysis is a
-  priority independent of tier ordering. See
+  validated direction, node transfer and structure-boundary semantics beyond
+  the opt-in structural graph reader in
+  [decision 0036](decisions/0036-diagram-graph-reader.md). The reader preserves
+  terminal-UID nets and explicit unresolved connections; it does not yet
+  resolve callees or perform taint analysis. `System Exec.vi` command-input
+  analysis is a priority independent of tier ordering. See
   [decision 0026](decisions/0026-security-analysis-command-and-rules.md).
 - **Interprocedural dataflow/taint tracing (Tier 2b):** trace a value across
   subVI call boundaries using a project-wide call graph, for example SQL

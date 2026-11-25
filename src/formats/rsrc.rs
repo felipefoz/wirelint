@@ -60,16 +60,16 @@ pub(super) fn read_facts_with_connector_pane_pattern(
     .map(|(facts, _)| facts)
 }
 
-/// Extracts an owning-library path when orphaned-VI analysis is requested.
-pub(super) fn read_facts_with_orphaned_vi(
-    bytes: &[u8],
-    read_version: bool,
-    read_description: bool,
-    read_password: bool,
-    read_orphaned_vi: bool,
-    read_connector_pane_pattern: bool,
-    read_default_strings: bool,
-) -> io::Result<(FileFacts, Vec<Vec<u8>>)> {
+/// Validated resource-table and data regions shared by the fact and graph readers.
+struct Resources<'a> {
+    is_vi: bool,
+    table: &'a [u8],
+    table_size: usize,
+    data: &'a [u8],
+}
+
+/// Validates the format-3 header chain and bounds the block table and data region.
+fn resources(bytes: &[u8]) -> io::Result<Resources<'_>> {
     let first_header = slice(bytes, 0, 32)?;
     let mut header_offset = 0;
     let header = loop {
@@ -120,14 +120,75 @@ pub(super) fn read_facts_with_orphaned_vi(
         .and_then(|size| size.checked_add(4))
         .ok_or_else(|| invalid("RSRC block table size overflow"))?;
     slice(table, 0, table_size)?;
+    Ok(Resources {
+        is_vi: matches!(&header[8..12], b"LVIN" | b"sVIN"),
+        table,
+        table_size,
+        data,
+    })
+}
 
+/// Reads a VI's saved source topology independently of rule fact extraction.
+///
+/// `None` means no source diagram is available, not an empty or safe graph.
+/// Controls, unsupported heap variants, duplicate heaps and malformed resources
+/// return `InvalidData`. Graph issues remain available to the caller.
+pub(super) fn read_diagram_graph(
+    bytes: &[u8],
+) -> io::Result<Option<super::heap::graph::DiagramGraph>> {
+    let Resources {
+        is_vi,
+        table,
+        table_size,
+        data,
+    } = resources(bytes)?;
+    if !is_vi {
+        return Err(invalid("diagram graph requires a VI resource"));
+    }
+    let mut graph = None;
+    for block in table[4..table_size].as_chunks::<12>().0 {
+        if &block[..4] == b"BDHb" {
+            if graph.is_some() {
+                return Err(invalid("duplicate BDHb block diagram"));
+            }
+            graph = Some(super::heap::read_graph(
+                table,
+                table_size,
+                data,
+                number(block, 4)?,
+                number(block, 8)?,
+            )?);
+        } else if matches!(&block[..4], b"BDHP" | b"BDHc") {
+            return Err(invalid(
+                "unsupported block diagram heap format for graph extraction",
+            ));
+        }
+    }
+    Ok(graph)
+}
+
+/// Extracts an owning-library path when orphaned-VI analysis is requested.
+pub(super) fn read_facts_with_orphaned_vi(
+    bytes: &[u8],
+    read_version: bool,
+    read_description: bool,
+    read_password: bool,
+    read_orphaned_vi: bool,
+    read_connector_pane_pattern: bool,
+    read_default_strings: bool,
+) -> io::Result<(FileFacts, Vec<Vec<u8>>)> {
+    let Resources {
+        is_vi,
+        table,
+        table_size,
+        data,
+    } = resources(bytes)?;
     let mut separate_compiled_code = None;
     let mut file_version = None;
     let mut saved_version = None;
     let mut debugging_enabled = None;
     let mut has_breakpoints = None;
     let mut auto_error_handling = None;
-    let is_vi = matches!(&header[8..12], b"LVIN" | b"sVIN");
     let mut has_password = (read_password && is_vi).then_some(false);
     let mut bdpw_seen = false;
     let mut strg = None;

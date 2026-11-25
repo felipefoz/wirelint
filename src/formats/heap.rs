@@ -1,6 +1,10 @@
 //! Bounded decoding of version-b object heaps: block-diagram free-label
 //! bookmarks, terminal display styles, and string constants from `BDHb`, and
-//! front-panel control defaults and name labels from `FPHb`.
+//! front-panel control defaults and name labels from `FPHb`. The opt-in graph
+//! reader preserves object identity and signal connections without interpreting
+//! dataflow or compiled code.
+
+pub(super) mod graph;
 
 use super::{invalid, rsrc};
 use flate2::bufread::ZlibDecoder;
@@ -9,6 +13,7 @@ use std::io::{self, Read};
 const MAX_HEAP_SIZE: usize = 64 * 1024 * 1024;
 const ARRAY_ELEMENT: i32 = -6;
 const CLASS: i32 = -2;
+const UID: i32 = -3;
 const DIAGRAM: i32 = 27;
 const LABEL: i32 = 10;
 const TEXT_HAIR: i32 = 1;
@@ -43,6 +48,7 @@ const ICON_STYLE_FLAG: u32 = 0x0400_0000;
 struct Node {
     tag: i32,
     class: Option<i32>,
+    uid: Option<i32>,
 }
 
 /// Facts obtained from one block-diagram heap.
@@ -169,6 +175,25 @@ fn read_heap(
     Ok(decoded)
 }
 
+/// Reads only graph topology, without running string/default-value extraction.
+pub(super) fn read_graph(
+    table: &[u8],
+    table_size: usize,
+    data: &[u8],
+    count_minus_one: usize,
+    section_offset: usize,
+) -> io::Result<graph::DiagramGraph> {
+    let heap = read_heap(
+        "BDHb",
+        table,
+        table_size,
+        data,
+        count_minus_one,
+        section_offset,
+    )?;
+    graph::parse(&heap).map_err(|error| invalid(format!("BDHb graph: {error}")))
+}
+
 /// How a heap node relates to the scope stack.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Scope {
@@ -201,6 +226,7 @@ fn walk_heap<'a>(
             raw_tag - 31
         };
         let mut class = None;
+        let mut uid = None;
         if attributes {
             let count = unsigned_variable(bytes, &mut cursor)?;
             for _ in 0..count {
@@ -208,6 +234,9 @@ fn walk_heap<'a>(
                 let value = signed_short_variable(bytes, &mut cursor)?;
                 if id == CLASS && class.replace(value).is_some() {
                     return Err(invalid("duplicate heap class attribute"));
+                }
+                if id == UID && uid.replace(value).is_some() {
+                    return Err(invalid("duplicate heap UID attribute"));
                 }
             }
         }
@@ -218,7 +247,7 @@ fn walk_heap<'a>(
             _ => return Err(invalid("unsupported heap value size")),
         };
         let content = take(bytes, &mut cursor, length)?;
-        let node = Node { tag, class };
+        let node = Node { tag, class, uid };
         match scope {
             0 => {
                 visit(&stack, node, Scope::Open, content)?;

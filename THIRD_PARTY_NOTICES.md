@@ -147,6 +147,14 @@ The scalar diagram-string reader uses pylabview's `SL__bDConstDCO`,
 `SL__stdString`, and `OF__ConstValue` in `LVheap.py`, and labview-mcp's
 `experiments/pylabview/FINDINGS.md` section 3.19 as format references.
 
+The structural diagram graph reader uses pylabview's UID/class attributes,
+object class and field IDs, and signed heap integer representation in
+`LVheap.py`. labview-mcp's `experiments/pylabview/FINDINGS.md` section 3 and
+`experiments/aixml-without-grpc/FINDINGS.md` describe symbolic terminal
+connections, fan-out and structure boundaries. These were consulted as format
+descriptions. Tests use synthetic data and existing project-owned VIs;
+no implementation code or external fixtures were copied.
+
 ## Rust dependencies
 
 WireLint uses Clap for the CLI, flate2 for zlib decompression, roxmltree for
