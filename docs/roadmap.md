@@ -43,7 +43,10 @@ decisions are omitted.
   within one block diagram, for example OS command injection or path
   traversal where the tainted string and the sink are in the same VI. Needs
   a block-diagram wire/node graph model WireLint does not have yet, beyond
-  the bounded `BDHb` heap reads used today. See
+  the bounded `BDHb` heap reads used today. Initial investigation confirmed
+  terminal-UID signal connections and a subVI call-to-`LIbd` link, but not a
+  complete graph reader. `System Exec.vi` command-input analysis is a
+  priority independent of tier ordering. See
   [decision 0026](decisions/0026-security-analysis-command-and-rules.md).
 - **Interprocedural dataflow/taint tracing (Tier 2b):** trace a value across
   subVI call boundaries using a project-wide call graph, for example SQL

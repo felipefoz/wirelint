@@ -132,6 +132,49 @@ consumers. Restrict `gitlab-sast` to `wirelint sast`; `scan` continues to
 support GitLab Code Quality and SARIF. This supersedes the earlier availability
 choice above.
 
+### Amendment (2026-11-25): investigate command-input dataflow
+
+Discard the proposed `remote-panel-enabled` rule; it is not part of the
+planned rule set. Prioritize investigating a `System Exec.vi` command-input
+check instead of treating the Tier 1/Tier 2 boundary as an implementation
+order. A call alone is not a finding: a possible finding requires evidence
+that a control or other externally influenced value can reach the command
+input, including through local string operations. Such a path is a review
+signal, not proof of an exploitable vulnerability. Its exact coverage and
+handling of incomplete analysis require a separate decision before a rule
+is implemented.
+
+An initial read-only investigation found that:
+
+- In `BDHb`, a diagram's `signalList` contains signals whose `termList`
+  references terminal UIDs. The compressed wire table represents drawing
+  geometry, not the connection. Signals can have multiple ends. The heap
+  walker currently discards UID attributes and does not construct this graph.
+- Front-panel terminals and constants have identifiable terminal definitions.
+  The saved `tests/fixtures/sast/hardcoded-secret-default/credentials-separated.vi`
+  fixture connects control terminal `20067` to indicator terminal `20090`;
+  `tests/fixtures/quality/debugging-status/broken-wire.vi` also has a signal
+  with two terminal references. Connectivity alone therefore does not
+  establish a valid executable path.
+- In a reference caller, an `LIbd/BDHP/IUVI` link's `LinkOffsetList` value
+  `0x10EE` identifies `iUse` node `4334` in the diagram and names its callee.
+  The caller is `labview-mcp/tests/LabVIEWMCP.Tests/Fixtures/compiled-code/Compiled Caller.vi`.
+  The existing `LIvi` owner reader does not decode these diagram links.
+  The reference fixture `labview-mcp/tests/LabVIEWMCP.Tests/Fixtures/housekeeping/Launcher.vi`
+  contains an `LIbd` record the research extractor cannot parse, so link
+  resolution cannot assume all records are understood.
+- Nested structures split signals at tunnels; terminal direction and primitive
+  identity require additional interpretation. Unresolved nodes, links,
+  terminals, or paths must not silently be treated as safe.
+
+These observations establish feasibility, not a complete graph format or a
+validated injection detector. Build and validate the reader against
+representative saved VIs, including branching, nested structures and broken
+wires, before enabling a security rule. See
+`labview-mcp/experiments/pylabview/FINDINGS.md` section 3 and
+`labview-mcp/experiments/aixml-without-grpc/FINDINGS.md` sections 3 and 4a for
+the referenced format research.
+
 ## Alternatives
 
 - **Infer the scan type from findings:** rejected because scans without
