@@ -17,6 +17,9 @@ the installing user's PATH. Do not offer a per-system install option initially.
 Maintain the customized WiX template locally and configure cargo-dist with
 `allow-dirty = ["msi"]`, so release planning does not reject the per-user
 changes or regenerate the default per-machine installer.
+Use HKCU registry key paths for components installed under the user profile,
+and remove their empty directories on uninstall. Keep component GUIDs stable
+across releases.
 
 ## Alternatives
 

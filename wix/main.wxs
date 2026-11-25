@@ -97,15 +97,20 @@
                           2. Comment out or remove the `ComponentRef` tag with the "License" Id
                              attribute value further down in this file.
                         -->
-                        <Component Id='License' Guid='*'>
+                        <Component Id='License' Guid='F78E596F-EDFA-4685-95E6-EC9297ADAD9A'>
                             <File Id='LicenseFile'
                                 DiskId='1'
-                                Source='LICENSE'
-                                KeyPath='yes'/>
+                                Source='LICENSE'/>
+                            <RegistryValue Root='HKCU' Key='Software\WireLint'
+                                Name='License' Type='integer' Value='1' KeyPath='yes'/>
+                            <RemoveFolder Id='RemoveApplicationFolder' Directory='APPLICATIONFOLDER' On='uninstall'/>
+                            <RemoveFolder Id='RemoveProgramsFolder' Directory='WireLintProgramsFolder' On='uninstall'/>
                         </Component>
 
                         <Directory Id='Bin' Name='bin'>
-                            <Component Id='Path' Guid='F01D3E10-263B-4956-9C5E-B5DDCF9270E5' KeyPath='yes'>
+                            <Component Id='Path' Guid='F01D3E10-263B-4956-9C5E-B5DDCF9270E5'>
+                                <RegistryValue Root='HKCU' Key='Software\WireLint'
+                                    Name='Path' Type='integer' Value='1' KeyPath='yes'/>
                                 <Environment
                                     Id='PATH'
                                     Name='PATH'
@@ -115,13 +120,15 @@
                                     Action='set'
                                     System='no'/>
                             </Component>
-                            <Component Id='binary0' Guid='*'>
+                            <Component Id='binary0' Guid='3620624C-6212-4975-BE99-2CB2241ACCE4'>
                                 <File
                                     Id='exe0'
                                     Name='wirelint.exe'
                                     DiskId='1'
-                                    Source='$(var.CargoTargetBinDir)\wirelint.exe'
-                                    KeyPath='yes'/>
+                                    Source='$(var.CargoTargetBinDir)\wirelint.exe'/>
+                                <RegistryValue Root='HKCU' Key='Software\WireLint'
+                                    Name='Binary' Type='integer' Value='1' KeyPath='yes'/>
+                                <RemoveFolder Id='RemoveBinFolder' Directory='Bin' On='uninstall'/>
                             </Component>
                         </Directory>
                     </Directory>
