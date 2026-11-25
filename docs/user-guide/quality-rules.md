@@ -27,6 +27,7 @@ For security analysis rules, see the separate
 - [class-mutation-history](#class-mutation-history)
 - [terminal-style](#terminal-style)
 - [connector-pane-pattern](#connector-pane-pattern)
+- [path-usage](#path-usage)
 
 ## Execution order
 
@@ -96,6 +97,35 @@ containing only directives still produces a finding unless that rule is
 explicitly skipped too. Descriptions are read and validated even when
 `file-description` is disabled, because directives may skip other enabled rules.
 If all rules are disabled, files are still not read.
+
+## `path-usage`
+
+Warns about ordinary scalar path constants that are empty, scalar path
+constants and front-panel defaults that are absolute, and relative path
+components with invalid target-platform syntax. Dedicated Empty Path and
+Not a Path nodes are allowed, as are relative paths and LabVIEW's Not a Path
+value. The rule does not check whether a file exists.
+
+```yaml
+rules:
+  path-usage:
+    enabled: true
+    severity: warning
+    targets: [windows, linux]
+```
+
+`targets` accepts `windows`, `linux`, or both. Both are checked by default;
+syntax invalid on either selected platform is reported. Checks are independent
+of the host OS. Windows checks include forbidden characters, trailing spaces
+or periods, and reserved device names. Linux checks reject NUL and separators
+inside a component. Absolute paths are reported regardless of `targets`.
+
+This initial reader examines scalar `stdPath` objects in VI source heaps. It
+does not inspect path values inside arrays or clusters, string values converted
+to paths, or paths built at runtime. It includes saved indicator defaults.
+Malformed or unsupported path records produce an analysis error rather than
+an assumed valid path. A file produces at most one finding, with the first
+offending object and a count of additional values.
 
 ## `separate-compiled-code`
 

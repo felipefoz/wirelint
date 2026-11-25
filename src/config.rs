@@ -50,6 +50,14 @@ pub enum TerminalDisplayStyle {
     Icon,
 }
 
+/// Filesystem syntax checked by the path-usage rule.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PathTarget {
+    Windows,
+    Linux,
+}
+
 /// Common options and validated options for individual built-in rules.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
@@ -67,6 +75,22 @@ pub struct RuleConfig {
     pub preferred_style: Option<TerminalDisplayStyle>,
     #[serde(default, deserialize_with = "connector_pane_patterns")]
     pub allowed_patterns: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "path_targets")]
+    pub targets: Option<Vec<PathTarget>>,
+}
+
+/// Rejects null, empty, and duplicate target lists.
+fn path_targets<'de, D>(deserializer: D) -> Result<Option<Vec<PathTarget>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let targets = Vec::<PathTarget>::deserialize(deserializer)?;
+    if targets.is_empty() || (targets.len() > 1 && targets[0] == targets[1]) || targets.len() > 2 {
+        return Err(serde::de::Error::custom(
+            "targets must contain distinct windows and/or linux",
+        ));
+    }
+    Ok(Some(targets))
 }
 
 /// Rejects explicit nulls and invalid states rather than substituting a default.
@@ -292,6 +316,12 @@ impl Config {
                     format!("allowed-patterns is not supported by rule '{id}'"),
                 ));
             }
+            if id != "path-usage" && options.targets.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("targets is not supported by rule '{id}'"),
+                ));
+            }
             if let Some(allowed) = &options.allowed_patterns {
                 if allowed.is_empty() {
                     return Err(io::Error::new(
@@ -397,6 +427,24 @@ mod tests {
                 .unwrap()
                 .rules["separate-compiled-code"]
                 .enabled
+        );
+    }
+
+    #[test]
+    fn validates_path_usage_targets() {
+        for yaml in [
+            "rules:\n  path-usage:\n    targets: []",
+            "rules:\n  path-usage:\n    targets: null",
+            "rules:\n  path-usage:\n    targets: [windows, windows]",
+            "rules:\n  path-usage:\n    targets: [macos]",
+            "rules:\n  saved-version:\n    targets: [linux]",
+        ] {
+            assert!(Config::parse(yaml).is_err(), "{yaml}");
+        }
+        let config = Config::parse("rules:\n  path-usage:\n    targets: [linux]\n").unwrap();
+        assert_eq!(
+            config.rules["path-usage"].targets,
+            Some(vec![PathTarget::Linux])
         );
     }
 

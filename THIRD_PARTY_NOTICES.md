@@ -162,6 +162,12 @@ and qualified-name/type-index encodings in `LVmisc.py`. labview-mcp's
 slots and terminal flags. These are format references, not copied code.
 System Exec caller fixtures are original WireLint diagrams.
 
+The path-usage reader consulted pylabview's `LVclasses.py` and `LVheap.py`,
+pylavi's `data_types.py`, labview-mcp's `aixml2vi.py`, and LVPM's
+`tools/linkfix/deptree.py` for flattened path records and heap identifiers.
+These are format references; no implementation code or external fixtures were
+copied.
+
 ## Rust dependencies
 
 WireLint uses Clap for the CLI, flate2 for zlib decompression, roxmltree for

@@ -103,6 +103,7 @@ pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Ru
     let read_command_inputs = active
         .iter()
         .any(|(rule, _, _)| rule.id() == "system-exec-command-input");
+    let read_paths = active.iter().any(|(rule, _, _)| rule.id() == "path-usage");
     let mut analyzed_files = Vec::new();
     for path in files {
         let result = fs::read(root.join(path)).and_then(|bytes| {
@@ -122,6 +123,13 @@ pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Ru
                     .any(|bookmark| suppresses(bookmark, "system-exec-command-input"))
             {
                 facts.system_exec_inputs = formats::read_system_exec_inputs(path, &bytes)?;
+            }
+            if read_paths
+                && !bookmarks
+                    .iter()
+                    .any(|bookmark| suppresses(bookmark, "path-usage"))
+            {
+                facts.path_usage = formats::read_path_usage(path, &bytes)?;
             }
             Ok((facts, bookmarks))
         });

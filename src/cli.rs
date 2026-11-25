@@ -28,8 +28,9 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Discover LabVIEW files and run enabled analysis rules.
+    /// Run quality rules, including scalar path usage checks.
     #[command(
+        after_long_help = "The path-usage rule reports empty ordinary scalar path constants, absolute scalar paths, and invalid path syntax. Its targets option accepts windows and/or linux (default: both).",
         long_about = "Recursively analyze .vi, .vit, .vim, .ctl, .lvproj, .lvclass, and .lvlib files (case-insensitive). Skip .llb archives and symbolic links below the root. A '#wirelint-ignore RULE-ID' directive in a VI block-diagram free label or on a standalone line in an XML file's own description skips that enabled rule for that file and is reported on stdout. Directive lines alone do not satisfy file-description. All built-in rules are enabled by default, including saved-version with a minimum saved LabVIEW version of 20.0 and no maximum. The class-mutation-history rule warns when an .lvclass contains mutation-history content in its NI.LVClass.Geneology XML property. The orphaned-vi rule resolves owner paths relative to the VI file and library member URLs relative to the library file. Library VI items without a URL attribute are skipped. The connector-pane-pattern rule skips global and polymorphic VIs without a connector pane. The auto-error-handling rule skips global and polymorphic VIs because they have no executable diagram of their own. Configure inclusive minimum-version and/or maximum-version bounds in YAML; a maximum-only configuration has no minimum. The debugging-status rule flags VIs with debugging enabled by default; set fail-when: disabled in YAML to reverse the check. The no-breakpoints rule reports VIs saved with block diagram breakpoints as errors by default. Print the scan type on stdout. Show summary totals and elapsed scan time by default; use --verbose for individual findings, without listing every discovered path. Elapsed time covers discovery and analysis, excluding configuration loading and final report rendering. Analysis errors always include file details. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error. Unsupported binary formats are errors, never passing checks."
     )]
     Scan {
@@ -423,6 +424,8 @@ mod tests {
             "Library VI items without a URL attribute are skipped",
             "connector-pane-pattern rule skips global and polymorphic VIs",
             "auto-error-handling rule skips global and polymorphic VIs",
+            "path-usage rule reports empty ordinary scalar path constants",
+            "windows and/or linux",
             "#wirelint-ignore RULE-ID",
             "XML file's own description",
             "Directive lines alone do not satisfy file-description",

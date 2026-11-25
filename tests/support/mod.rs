@@ -1,5 +1,7 @@
 //! Synthetic RSRC fixtures shared by parser and command-line tests.
 
+use std::io::Write;
+
 /// Builds the supported VI subset with LVSR settings and a relative LIvi owner.
 ///
 /// `library` is a sibling library name of at most 255 UTF-8 bytes.
@@ -22,9 +24,14 @@ pub fn vi_with_library_path(components: &[&str]) -> Vec<u8> {
         link.extend_from_slice(component.as_bytes());
     }
 
-    let data_size = 72 + 4 + link.len();
-    let table_size = 4 + 2 * 12;
-    let info_size = 52 + table_size + 2 * 20;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&[0, 0, 0, 0]).unwrap();
+    let mut panel = 4u32.to_be_bytes().to_vec();
+    panel.extend(encoder.finish().unwrap());
+    let panel_offset = 72 + 4 + link.len();
+    let data_size = panel_offset + 4 + panel.len();
+    let table_size = 4 + 3 * 12;
+    let info_size = 52 + table_size + 3 * 20;
     let info_offset = 32 + data_size;
     let mut bytes = vec![0; info_offset + info_size];
     for header in [0, info_offset] {
@@ -40,19 +47,24 @@ pub fn vi_with_library_path(components: &[&str]) -> Vec<u8> {
     put(&mut bytes, 44, 1 << 10);
     put(&mut bytes, 104, link.len() as u32);
     bytes[108..108 + link.len()].copy_from_slice(&link);
+    put(&mut bytes, 32 + panel_offset, panel.len() as u32);
+    bytes[36 + panel_offset..36 + panel_offset + panel.len()].copy_from_slice(&panel);
 
     put(&mut bytes, info_offset + 40, 32);
     put(&mut bytes, info_offset + 44, 52);
     put(&mut bytes, info_offset + 48, info_size as u32);
     let table = info_offset + 52;
-    put(&mut bytes, table, 1);
-    for (index, (id, offset)) in [(b"LVSR", 0), (b"LIvi", 72)].iter().enumerate() {
+    put(&mut bytes, table, 2);
+    for (index, (id, offset)) in [(b"LVSR", 0), (b"LIvi", 72), (b"FPHb", panel_offset)]
+        .iter()
+        .enumerate()
+    {
         let entry = table + 4 + index * 12;
         let section = table + table_size + index * 20;
         bytes[entry..entry + 4].copy_from_slice(*id);
         put(&mut bytes, entry + 8, (table_size + index * 20) as u32);
         put(&mut bytes, section + 4, u32::MAX);
-        put(&mut bytes, section + 12, *offset);
+        put(&mut bytes, section + 12, *offset as u32);
     }
     bytes
 }

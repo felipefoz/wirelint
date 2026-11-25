@@ -72,3 +72,8 @@ rules:
     severity: warning
     allowed-patterns:
       - "4x2x2x4"
+  # Check scalar path literals and defaults against both target platforms.
+  path-usage:
+    enabled: true
+    severity: warning
+    targets: [windows, linux]

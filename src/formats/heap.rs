@@ -35,6 +35,7 @@ const FP_DCO: i32 = 18;
 /// `SL__bDConstDCO` and `SL__stdString`: a string constant and its display object.
 const BD_CONST_DCO: i32 = 19;
 const STD_STRING: i32 = 81;
+const STD_PATH: i32 = 91;
 /// `OF__typeDesc`: a heap TypeID field.
 const TYPE_DESC: i32 = 283;
 /// `OF__DefaultData`: an object's default value in flattened form.
@@ -443,6 +444,94 @@ fn parse_diagram_strings(bytes: &[u8]) -> io::Result<Vec<DiagramStringConstant>>
     Ok(strings)
 }
 
+/// Extracts scalar path constants or front-panel defaults from a source heap.
+pub(super) fn read_paths(
+    table: &[u8],
+    table_size: usize,
+    data: &[u8],
+    count_minus_one: usize,
+    section_offset: usize,
+    diagram: bool,
+) -> io::Result<Vec<super::PathUsage>> {
+    let name = if diagram { "BDHb" } else { "FPHb" };
+    let heap = read_heap(
+        name,
+        table,
+        table_size,
+        data,
+        count_minus_one,
+        section_offset,
+    )?;
+    parse_paths(&heap, diagram).map_err(|error| invalid(format!("{name} path usage: {error}")))
+}
+
+/// Collects only `stdPath` objects, excluding dedicated fixed constants.
+fn parse_paths(bytes: &[u8], diagram: bool) -> io::Result<Vec<super::PathUsage>> {
+    struct OpenPath {
+        depth: usize,
+        class: Option<i32>,
+        ddo_seen: bool,
+        duplicate_ddo: bool,
+        data: Option<Vec<u8>>,
+        duplicate_data: bool,
+        name: NameLabel,
+    }
+    let target = if diagram { BD_CONST_DCO } else { FP_DCO };
+    let field = if diagram { CONST_VALUE } else { DEFAULT_DATA };
+    let mut open: Vec<OpenPath> = Vec::new();
+    let mut paths = Vec::new();
+    walk_heap(bytes, |stack, node, scope, content| {
+        if node.class == Some(target) && scope == Scope::Open {
+            open.push(OpenPath {
+                depth: stack.len(),
+                class: None,
+                ddo_seen: false,
+                duplicate_ddo: false,
+                data: None,
+                duplicate_data: false,
+                name: NameLabel::default(),
+            });
+        } else if node.class == Some(target) && scope == Scope::Close {
+            let object = open.pop().ok_or_else(|| invalid("unmatched path object"))?;
+            if object.class == Some(STD_PATH) {
+                if object.duplicate_data || object.duplicate_ddo {
+                    return Err(invalid("duplicate path DDO or value"));
+                }
+                match object.data {
+                    Some(data) => paths.push(super::path_usage::decode(
+                        &data,
+                        object.name.label,
+                        diagram,
+                    )?),
+                    None if diagram => return Err(invalid("path constant has no ConstValue")),
+                    None => {}
+                }
+            }
+        } else if let Some(object) = open.last_mut() {
+            let parents = &stack[object.depth..];
+            if parents.len() == 1 && scope == Scope::Open && node.tag == DDO {
+                if object.ddo_seen {
+                    object.duplicate_ddo = true;
+                } else {
+                    object.ddo_seen = true;
+                    object.class = node.class;
+                }
+            } else if parents.len() == 1
+                && matches!(scope, Scope::Open | Scope::Leaf)
+                && node.tag == field
+                && object.data.replace(content.to_vec()).is_some()
+            {
+                object.duplicate_data = true;
+            }
+            if object.class == Some(STD_PATH) {
+                object.name.visit(parents, node, scope, content)?;
+            }
+        }
+        Ok(())
+    })?;
+    Ok(paths)
+}
+
 /// Collects direct defaults and name labels of front-panel controls.
 fn parse_front_panel(bytes: &[u8]) -> io::Result<Vec<ControlDefault>> {
     struct OpenControl {
@@ -799,6 +888,7 @@ mod tests {
             if text.is_empty() {
                 continue;
             }
+
             node(heap, ARRAY_ELEMENT, 0, Some(LABEL as i16), &[]);
             node(heap, PART_ID, 1, None, &[id]);
             node(heap, TEXT_RECORD, 0, Some(TEXT_HAIR as i16), &[]);
@@ -812,6 +902,21 @@ mod tests {
             node(heap, CONST_VALUE, 1, None, data);
         }
         node(heap, 48, 2, None, &[]);
+    }
+
+    #[test]
+    fn path_constants_exclude_fixed_nodes_and_reject_missing_values() {
+        let mut heap = Vec::new();
+        let empty = b"PTH0\0\0\0\x04\0\0\0\0";
+        diagram_constant(&mut heap, STD_PATH as i16, Some(b"literal"), Some(empty));
+        diagram_constant(&mut heap, 78, None, Some(empty));
+        diagram_constant(&mut heap, 78, None, Some(b"PTH0\0\0\0\x04\0\x02\0\0"));
+        let values = parse_paths(&heap, true).unwrap();
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].label.as_deref(), Some(b"literal".as_slice()));
+        let mut missing = Vec::new();
+        diagram_constant(&mut missing, STD_PATH as i16, None, None);
+        assert!(parse_paths(&missing, true).is_err());
     }
 
     #[test]

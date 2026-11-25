@@ -117,7 +117,7 @@ fn vi_with_diagram(
     let description_size = description.map_or(0, |text| 8 + text.len());
     let password_record_offset = 72 + description_size;
     let password_size = password_hashes.map_or(0, |hashes| 4 + hashes.len());
-    let diagram = heap.map(|heap| {
+    let encode_heap = |heap: &[u8]| {
         let mut plain = (heap.len() as u32).to_be_bytes().to_vec();
         plain.extend_from_slice(heap);
         let mut encoder =
@@ -126,9 +126,12 @@ fn vi_with_diagram(
         let mut compressed = (plain.len() as u32).to_be_bytes().to_vec();
         compressed.extend(encoder.finish().unwrap());
         compressed
-    });
+    };
+    let diagram = heap.map(encode_heap);
+    let panel = encode_heap(&[]);
     let diagram_offset = password_record_offset + password_size;
     let diagram_size = diagram.as_ref().map_or(0, |payload| 4 + payload.len());
+    let panel_offset = diagram_offset + diagram_size;
     let mut resources = vec![(b"LVSR", 0)];
     if description.is_some() {
         resources.push((b"STRG", 72));
@@ -139,8 +142,9 @@ fn vi_with_diagram(
     if diagram.is_some() {
         resources.push((b"BDHb", diagram_offset));
     }
+    resources.push((b"FPHb", panel_offset));
     let block_count = resources.len();
-    let data_size = diagram_offset + diagram_size;
+    let data_size = panel_offset + 4 + panel.len();
     let table_size = 4 + block_count * 12;
     let info_size = 52 + table_size + block_count * 20;
     let info_offset = 32 + data_size;
@@ -187,11 +191,79 @@ fn vi_with_diagram(
         put_u32(&mut bytes, record, diagram.len() as u32);
         bytes[record + 4..record + 4 + diagram.len()].copy_from_slice(&diagram);
     }
+    let record = 32 + panel_offset;
+    put_u32(&mut bytes, record, panel.len() as u32);
+    bytes[record + 4..record + 4 + panel.len()].copy_from_slice(&panel);
     bytes
 }
 
 fn put_u32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+}
+
+#[test]
+fn path_usage_checks_saved_values_and_configured_targets() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("quality")
+        .join("path-usage");
+    let run = |config: Option<&Path>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_wirelint"));
+        command
+            .arg("scan")
+            .arg(&fixtures)
+            .args(["--verbose", "--fail-on", "none"]);
+        if let Some(config) = config {
+            command.arg("--config").arg(config);
+        }
+        let result = command.output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        String::from_utf8(result.stdout).unwrap()
+    };
+    let output = run(None);
+    for (name, reason) in [
+        ("Ordinary Empty Path.vi", "empty path"),
+        ("Absolute Path Constant.vi", "absolute path"),
+        ("Absolute Path Default.vi", "absolute path"),
+        ("Relative Colon Path.vi", "invalid Windows path syntax"),
+    ] {
+        assert!(
+            output.lines().any(|line| line.contains(name)
+                && line.contains("[path-usage]")
+                && line.contains(reason)),
+            "{output}"
+        );
+    }
+    for name in [
+        "Relative Path Constant.vi",
+        "Relative Path Default.vi",
+        "Dedicated Empty Path.vi",
+    ] {
+        assert!(
+            !output
+                .lines()
+                .any(|line| line.contains(name) && line.contains("[path-usage]")),
+            "{output}"
+        );
+    }
+    let directory = TestDirectory::new();
+    let config = directory.write(
+        "linux.yaml",
+        "rules:\n  path-usage:\n    targets: [linux]\n",
+    );
+    let output = run(Some(&config));
+    assert!(
+        !output
+            .lines()
+            .any(|line| line.contains("Relative Colon Path.vi") && line.contains("[path-usage]")),
+        "{output}"
+    );
+    assert!(output.lines().any(|line| line.contains("Absolute Path Constant.vi") && line.contains("[path-usage]")), "{output}");
 }
 
 /// Appends one BDHb heap node: open/self-closing/close scope 0/1/2.
@@ -1303,7 +1375,7 @@ fn disabling_all_rules_skips_parsing() {
     directory.write("broken.vi", []);
     let config = directory.write(
         "checks.yaml",
-        "rules:\n  separate-compiled-code:\n    enabled: false\n  saved-version:\n    enabled: false\n  file-description:\n    enabled: false\n  debugging-status:\n    enabled: false\n  no-breakpoints:\n    enabled: false\n  auto-error-handling:\n    enabled: false\n  password-set:\n    enabled: false\n  orphaned-vi:\n    enabled: false\n  class-mutation-history:\n    enabled: false\n  terminal-style:\n    enabled: false\n  connector-pane-pattern:\n    enabled: false\n",
+        "rules:\n  separate-compiled-code:\n    enabled: false\n  saved-version:\n    enabled: false\n  file-description:\n    enabled: false\n  debugging-status:\n    enabled: false\n  no-breakpoints:\n    enabled: false\n  auto-error-handling:\n    enabled: false\n  password-set:\n    enabled: false\n  orphaned-vi:\n    enabled: false\n  class-mutation-history:\n    enabled: false\n  terminal-style:\n    enabled: false\n  connector-pane-pattern:\n    enabled: false\n  path-usage:\n    enabled: false\n",
     );
     let output = directory.configured_scan(&config, &[]);
     assert_eq!(output.status.code(), Some(0));
@@ -2057,7 +2129,7 @@ fn ci_reports_cover_empty_scans_disabled_rules_and_partial_analysis_failures() {
     }
     let config = directory.write(
         "checks.yaml",
-        "rules:\n  separate-compiled-code:\n    enabled: false\n  saved-version:\n    enabled: false\n  file-description:\n    enabled: false\n  debugging-status:\n    enabled: false\n  no-breakpoints:\n    enabled: false\n  auto-error-handling:\n    enabled: false\n  password-set:\n    enabled: false\n  orphaned-vi:\n    enabled: false\n  class-mutation-history:\n    enabled: false\n  terminal-style:\n    enabled: false\n  connector-pane-pattern:\n    enabled: false\n",
+        "rules:\n  separate-compiled-code:\n    enabled: false\n  saved-version:\n    enabled: false\n  file-description:\n    enabled: false\n  debugging-status:\n    enabled: false\n  no-breakpoints:\n    enabled: false\n  auto-error-handling:\n    enabled: false\n  password-set:\n    enabled: false\n  orphaned-vi:\n    enabled: false\n  class-mutation-history:\n    enabled: false\n  terminal-style:\n    enabled: false\n  connector-pane-pattern:\n    enabled: false\n  path-usage:\n    enabled: false\n",
     );
     let output = directory.configured_scan(
         &config,

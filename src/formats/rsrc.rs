@@ -81,6 +81,7 @@ fn resources(bytes: &[u8]) -> io::Result<Resources<'_>> {
         {
             return Err(invalid("unsupported RSRC signature, version, or file type"));
         }
+
         if header[..16] != first_header[..16] || header[20..] != first_header[20..] {
             return Err(invalid("inconsistent RSRC headers"));
         }
@@ -126,6 +127,49 @@ fn resources(bytes: &[u8]) -> io::Result<Resources<'_>> {
         table_size,
         data,
     })
+}
+
+/// Reads scalar path objects from the saved source heaps, not compiled data.
+pub(super) fn read_path_usage(bytes: &[u8]) -> io::Result<Vec<super::PathUsage>> {
+    let resources = resources(bytes)?;
+    if !resources.is_vi {
+        return Ok(Vec::new());
+    }
+    let mut paths = Vec::new();
+    let mut diagram_seen = false;
+    let mut panel_seen = false;
+    for block in resources.table[4..resources.table_size].as_chunks::<12>().0 {
+        let is_diagram = match &block[..4] {
+            b"BDHb" => {
+                if std::mem::replace(&mut diagram_seen, true) {
+                    return Err(invalid("duplicate BDHb block diagram"));
+                }
+                true
+            }
+            b"FPHb" => {
+                if std::mem::replace(&mut panel_seen, true) {
+                    return Err(invalid("duplicate FPHb front-panel heap"));
+                }
+                false
+            }
+            b"BDHP" | b"BDHc" | b"FPHP" | b"FPHc" => {
+                return Err(invalid("unsupported heap format for path usage"));
+            }
+            _ => continue,
+        };
+        paths.extend(super::heap::read_paths(
+            resources.table,
+            resources.table_size,
+            resources.data,
+            number(block, 4)?,
+            number(block, 8)?,
+            is_diagram,
+        )?);
+    }
+    if !panel_seen {
+        return Err(invalid("missing FPHb front-panel heap for path usage"));
+    }
+    Ok(paths)
 }
 
 /// Reads a VI's saved source topology independently of rule fact extraction.
@@ -469,6 +513,7 @@ pub(super) fn read_facts_with_orphaned_vi(
     };
     Ok((
         FileFacts {
+            path_usage: None,
             system_exec_inputs: None,
             separate_compiled_code,
             has_description,

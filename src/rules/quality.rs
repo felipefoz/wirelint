@@ -4,6 +4,8 @@ use crate::config::{DebuggingState, RuleConfig, TerminalDisplayStyle};
 use crate::formats::{FileFacts, Version};
 use crate::rules::{Rule, Severity};
 
+mod path_usage;
+
 /// All built-in quality and hygiene rules, run by `wirelint scan`.
 pub static BUILT_INS: &[&dyn Rule] = &[
     &SeparateCompiledCode,
@@ -17,6 +19,7 @@ pub static BUILT_INS: &[&dyn Rule] = &[
     &ClassMutationHistory,
     &TerminalStyle,
     &ConnectorPanePattern,
+    &path_usage::PathUsageRule,
 ];
 
 /// Default minimum release for saved LabVIEW files.
@@ -411,6 +414,7 @@ mod tests {
                     terminal_icon_styles: None,
                     connector_pane_pattern: None,
                     default_string_values: None,
+                    path_usage: None,
                     diagram_string_values: None,
                 },
                 None
@@ -435,6 +439,7 @@ mod tests {
                     terminal_icon_styles: None,
                     connector_pane_pattern: None,
                     default_string_values: None,
+                    path_usage: None,
                     diagram_string_values: None,
                 },
                 None
@@ -492,6 +497,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             assert_eq!(rule.check(&facts, None).is_some(), violation);
@@ -595,6 +601,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             let options = RuleConfig {
@@ -604,6 +611,7 @@ mod tests {
                 maximum_version: maximum,
                 fail_when: None,
                 preferred_style: None,
+                targets: None,
                 allowed_patterns: None,
             };
             assert_eq!(
@@ -634,6 +642,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             assert_eq!(rule.check(&facts, None).is_some(), violation);
@@ -659,6 +668,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             assert_eq!(
@@ -673,6 +683,7 @@ mod tests {
                     maximum_version: None,
                     fail_when: Some(fail_when),
                     preferred_style: None,
+                    targets: None,
                     allowed_patterns: None,
                 };
                 let finding = DebuggingStatus.check(&facts, Some(&options));
@@ -712,6 +723,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             assert_eq!(NoBreakpoints.check(&facts, None).is_some(), expected);
@@ -738,6 +750,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             assert_eq!(PasswordSet.check(&facts, None).is_some(), expected);
@@ -766,6 +779,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             assert_eq!(AutoErrorHandling.check(&facts, None).is_some(), expected);
@@ -792,6 +806,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             assert_eq!(OrphanedVi.check(&facts, None).is_some(), expected);
@@ -820,6 +835,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             assert_eq!(ClassMutationHistory.check(&facts, None).is_some(), expected);
@@ -853,6 +869,7 @@ mod tests {
                 terminal_icon_styles,
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             assert_eq!(TerminalStyle.check(&facts, None).is_some(), expected);
@@ -883,6 +900,7 @@ mod tests {
                 terminal_icon_styles: Some(terminal_icon_styles),
                 connector_pane_pattern: None,
                 default_string_values: None,
+                path_usage: None,
                 diagram_string_values: None,
             };
             let options = RuleConfig {
@@ -892,6 +910,7 @@ mod tests {
                 maximum_version: None,
                 fail_when: None,
                 preferred_style: Some(preferred_style),
+                targets: None,
                 allowed_patterns: None,
             };
             assert_eq!(
@@ -919,6 +938,7 @@ mod tests {
             terminal_icon_styles: None,
             connector_pane_pattern,
             default_string_values: None,
+            path_usage: None,
             diagram_string_values: None,
         }
     }
@@ -937,6 +957,7 @@ mod tests {
             maximum_version: None,
             fail_when: None,
             preferred_style: None,
+            targets: None,
             allowed_patterns: None,
         };
         assert!(ConnectorPanePattern.check(&facts, Some(&options)).is_none());
@@ -952,6 +973,7 @@ mod tests {
             maximum_version: None,
             fail_when: None,
             preferred_style: None,
+            targets: None,
             allowed_patterns: Some(allowed_patterns),
         };
         // Index 0 -> "1" (allowed), index 5 -> "2x2" (allowed), index 2 -> "2x1" (not allowed).

@@ -4,12 +4,14 @@ mod call_links;
 mod command_input;
 mod connector;
 mod heap;
+mod path_usage;
 mod rsrc;
 mod typed_data;
 mod xml;
 
 pub use command_input::SystemExecInputs;
 pub use heap::DiagramStringConstant;
+pub use path_usage::{PathKind, PathUsage};
 pub use typed_data::DefaultStringValue;
 
 use std::io;
@@ -86,6 +88,8 @@ impl std::fmt::Display for Version {
 /// Facts shared by all rules; extracted once for each analyzed file.
 #[derive(Debug)]
 pub struct FileFacts {
+    /// Path constants and scalar control defaults, when requested.
+    pub path_usage: Option<Vec<PathUsage>>,
     /// Local command-input evidence, only extracted for the System Exec rule.
     pub system_exec_inputs: Option<SystemExecInputs>,
     pub separate_compiled_code: bool,
@@ -117,6 +121,19 @@ pub struct FileFacts {
     pub default_string_values: Option<Vec<DefaultStringValue>>,
     /// Scalar string constants stored in a VI's block-diagram source heap.
     pub diagram_string_values: Option<Vec<DiagramStringConstant>>,
+}
+
+/// Reads path values from VI source heaps without using the host filesystem.
+pub fn read_path_usage(path: &Path, bytes: &[u8]) -> io::Result<Option<Vec<PathUsage>>> {
+    let extension = path.extension().and_then(|value| value.to_str());
+    if !extension.is_some_and(|extension| {
+        ["vi", "vit", "vim"]
+            .iter()
+            .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+    }) {
+        return Ok(None);
+    }
+    rsrc::read_path_usage(bytes).map(Some)
 }
 
 /// Reads a VI-family RSRC file or an XML project/library/class document.

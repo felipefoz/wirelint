@@ -30,6 +30,14 @@ cargo run -- scan tests/fixtures/quality/saved-version --config tests/fixtures/q
 The password-protected VI uses the fixture-only password
 `WireLintFixtureOnly-2026`.
 
+The `quality/path-usage` VIs were saved and run by LabVIEW without file
+operations. The ordinary empty and absolute constant and absolute default
+fixtures should produce findings; the relative and dedicated Empty Path
+fixtures should not. `Relative Colon Path.vi` is invalid for Windows but valid
+for Linux and exercises `targets`. `Path Usage Values.vi` combines several
+values to exercise the per-file finding count. Dedicated Not a Path is covered
+by synthetic heap tests; no LabVIEW-saved fixture was generated for it.
+
 The separate-compiled-code folder contains a LabVIEW-saved VI and a synthetic
 XML library. They exercise the VI save-record flag and the library's
 `NI.LV.All.SourceOnly` property respectively.
