@@ -42,10 +42,10 @@ rules:
   no-breakpoints:
     enabled: true
     severity: error
-  # Disallow VIs saved with automatic error handling enabled.
+  # Warn about VIs saved with automatic error handling enabled.
   auto-error-handling:
     enabled: true
-    severity: error
+    severity: warning
   # Warn when a VI or VI template has a password set.
   password-set:
     enabled: true

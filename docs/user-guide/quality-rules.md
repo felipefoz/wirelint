@@ -307,9 +307,9 @@ Example.vi: error [no-breakpoints]: Remove all block diagram breakpoints before 
 
 ## `auto-error-handling`
 
-Disallows automatic error handling on VIs and VI templates (`.vi`, `.vit`,
-`.vim`). It is enabled by default with `error` severity, so an enabled setting
-fails the default CI threshold. Global and polymorphic VIs have no executable
+Warns about automatic error handling on VIs and VI templates (`.vi`, `.vit`,
+`.vim`). It is enabled by default with `warning` severity, so findings do not
+fail the default CI threshold. Global and polymorphic VIs have no executable
 diagram of their own and are skipped, even when the saved flag is enabled.
 Controls and XML project, library, and class files are also skipped.
 
@@ -324,13 +324,13 @@ resolve a finding. WireLint does not change the setting.
 rules:
   auto-error-handling:
     enabled: true
-    severity: error
+    severity: warning
 ```
 
 Use `--verbose` to show findings:
 
 ```text
-Example.vi: error [auto-error-handling]: Automatic error handling is enabled. Disable 'Enable automatic error handling' in VI Properties > Execution.
+Example.vi: warning [auto-error-handling]: Automatic error handling is enabled. Disable 'Enable automatic error handling' in VI Properties > Execution.
 ```
 
 ## `password-set`

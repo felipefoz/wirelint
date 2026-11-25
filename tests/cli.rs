@@ -698,7 +698,7 @@ fn password_findings_are_warnings_and_follow_the_failure_threshold() {
 }
 
 #[test]
-fn automatic_error_handling_fails_only_for_vi_files_with_the_flag_set() {
+fn automatic_error_handling_warns_only_for_vi_files_with_the_flag_set() {
     let directory = TestDirectory::new();
     let mut enabled = vi_with_separation(true, b"LVIN");
     let flags = u32::from_be_bytes(enabled[44..48].try_into().unwrap());
@@ -711,12 +711,12 @@ fn automatic_error_handling_fails_only_for_vi_files_with_the_flag_set() {
     directory.write("control.ctl", control);
 
     let output = directory.scan(&["--verbose"]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Analyzed 3 file(s); 1 finding(s); 0 analysis error(s)."));
     assert!(stdout.contains(
-        "enabled.vi: error [auto-error-handling]: Automatic error handling is enabled. Disable 'Enable automatic error handling' in VI Properties > Execution."
+        "enabled.vi: warning [auto-error-handling]: Automatic error handling is enabled. Disable 'Enable automatic error handling' in VI Properties > Execution."
     ));
     assert!(!stdout.contains("disabled.vi:"));
     assert!(!stdout.contains("control.ctl:"));
@@ -737,16 +737,16 @@ fn automatic_error_handling_skips_global_and_polymorphic_fixtures() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{stdout}\n{stderr}");
+    assert_eq!(output.status.code(), Some(0), "{stdout}\n{stderr}");
     assert!(stderr.is_empty(), "{stderr}");
     assert!(stdout.contains("Analyzed 3 file(s)"), "{stdout}");
     assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
     assert!(
-        stdout.contains("enabled.vi: error [auto-error-handling]"),
+        stdout.contains("enabled.vi: warning [auto-error-handling]"),
         "{stdout}"
     );
     assert_eq!(
-        stdout.matches(": error [auto-error-handling]").count(),
+        stdout.matches(": warning [auto-error-handling]").count(),
         1,
         "{stdout}"
     );
@@ -1759,7 +1759,7 @@ fn lists_rules_and_handles_an_empty_folder() {
     assert!(rules.contains("file-description [scan, warning]"));
     assert!(rules.contains("debugging-status [scan, warning]"));
     assert!(rules.contains("no-breakpoints [scan, error]"));
-    assert!(rules.contains("auto-error-handling [scan, error]"));
+    assert!(rules.contains("auto-error-handling [scan, warning]"));
     assert!(rules.contains("password-set [scan, warning]"));
     assert!(rules.contains("hardcoded-secret-default [sast, warning] (CWE-798, CWE-259)"));
     assert!(rules.contains("system-exec-command-input [sast, warning] (CWE-78, CWE-88)"));

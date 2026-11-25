@@ -169,7 +169,7 @@ impl Rule for NoBreakpoints {
     }
 }
 
-/// Rejects VIs saved with automatic error handling enabled.
+/// Warns about VIs saved with automatic error handling enabled.
 struct AutoErrorHandling;
 
 impl Rule for AutoErrorHandling {
@@ -182,7 +182,7 @@ impl Rule for AutoErrorHandling {
     }
 
     fn default_severity(&self) -> Severity {
-        Severity::Error
+        Severity::Warning
     }
 
     fn check(&self, facts: &FileFacts, _options: Option<&RuleConfig>) -> Option<String> {
@@ -745,8 +745,8 @@ mod tests {
     }
 
     #[test]
-    fn automatic_error_handling_is_an_error_only_when_enabled() {
-        assert_eq!(AutoErrorHandling.default_severity(), Severity::Error);
+    fn automatic_error_handling_warns_only_when_enabled() {
+        assert_eq!(AutoErrorHandling.default_severity(), Severity::Warning);
         for (auto_error_handling, expected) in
             [(None, false), (Some(false), false), (Some(true), true)]
         {

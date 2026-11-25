@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-18
 - Partially superseded by: [decision 0035](0035-automatic-error-handling-vi-types.md)
+  and [decision 0038](0038-auto-error-handling-warning-default.md)
 
 ## Context
 
