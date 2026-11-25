@@ -22,6 +22,7 @@ pub(super) fn read_facts(
 ///
 /// Owner descriptions are validated even when their rule is disabled because
 /// directives can suppress other rules. Directive-only text is not a description.
+/// VI items without a URL have no saved member path and are omitted.
 pub(super) fn read_facts_with_members(
     bytes: &[u8],
     expected_root: &str,
@@ -115,9 +116,9 @@ pub(super) fn read_facts_with_members(
             .descendants()
             .filter(|node| node.has_tag_name("Item") && node.attribute("Type") == Some("VI"))
         {
-            let url = item
-                .attribute("URL")
-                .ok_or_else(|| invalid("library VI item is missing its URL"))?;
+            let Some(url) = item.attribute("URL") else {
+                continue;
+            };
             if url.trim().is_empty() {
                 return Err(invalid("library VI item has an empty URL"));
             }
@@ -157,4 +158,37 @@ pub(super) fn read_facts_with_members(
         },
         directives,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skips_url_less_vi_items_without_dropping_saved_members_or_owner_facts() {
+        let xml = br#"<Library>
+            <Property Name="NI.LV.All.SourceOnly" Type="Bool">true</Property>
+            <Property Name="NI.Lib.Description" Type="Str">Library description.</Property>
+            <Item Name="Attribute" Type="Folder">
+                <Item Name="Untitled 8" Type="VI"/>
+                <Item Name="member.vi" Type="VI" URL="../member.vi"/>
+            </Item>
+        </Library>"#;
+        let (facts, _) = read_facts_with_members(xml, "Library", false, true, true).unwrap();
+        assert_eq!(facts.library_members, Some(vec!["../member.vi".to_owned()]));
+        assert!(facts.separate_compiled_code);
+        assert_eq!(facts.has_description, Some(true));
+    }
+
+    #[test]
+    fn rejects_explicitly_empty_vi_member_urls() {
+        for url in ["", "   "] {
+            let xml =
+                format!(r#"<Library><Item Name="member.vi" Type="VI" URL="{url}"/></Library>"#);
+            let error =
+                read_facts_with_members(xml.as_bytes(), "Library", false, false, true).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(error.to_string(), "library VI item has an empty URL");
+        }
+    }
 }

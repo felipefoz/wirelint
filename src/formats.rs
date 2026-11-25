@@ -417,7 +417,7 @@ mod tests {
         );
         assert!(
             xml::read_facts_with_members(
-                br#"<Library><Item Name="missing-url.vi" Type="VI"/></Library>"#,
+                br#"<Library><Item Name="empty-url.vi" Type="VI" URL=""/></Library>"#,
                 "Library",
                 false,
                 false,

@@ -54,6 +54,18 @@ against the VI file, subject to the existing scan-root boundary. Dropping
 empty components and starting at the VI's directory could select a
 same-named library in the wrong directory or skip a scanned owner.
 
+## Amendment (2026-11-24): skip VI items without a URL
+
+NI's LabVIEW 2024 `Function.lvlib` contains an `Untitled 8` VI item with no
+`URL` attribute. This item has no saved file path and does not prevent LabVIEW
+from using the library. Skip such items when collecting library members,
+while preserving the library's other facts and all members with URLs.
+
+Rejecting the entire library would make an unsaved-item placeholder an
+analysis error. Guessing a path from the item name could incorrectly classify
+an orphan as a member. Explicitly empty URLs remain analysis errors; other
+member URL handling is unchanged. This exception only covers an absent attribute.
+
 ## References
 
 - [Rule architecture](0006-rule-runner-and-source-only-check.md)

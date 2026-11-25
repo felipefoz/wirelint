@@ -39,3 +39,7 @@ global and polymorphic negative fixtures. The latter two have their saved flag
 clear: LabVIEW rejects enabling it through VI Server with error 1035. Synthetic
 reader tests cover both flag states for these kinds. Only the standard VI
 should produce an auto-error-handling finding.
+
+The orphaned-vi `url-less-items` fixture is a synthetic library containing
+both an unsaved VI item without a URL and a normal member URL. The URL-less
+item should not cause an analysis error or discard the normal member.

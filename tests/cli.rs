@@ -981,7 +981,10 @@ fn orphaned_vi_rule_flags_only_a_scanned_library_that_omits_the_vi() {
         "orphan-vi.vi",
         support::vi_with_library_link("orphaned-example.lvlib"),
     );
-    orphaned.write("orphaned-example.lvlib", "<Library/>");
+    orphaned.write(
+        "orphaned-example.lvlib",
+        r#"<Library><Item Name="orphan-vi.vi" Type="VI"/></Library>"#,
+    );
     let config = orphaned.write("checks.yaml", rule_config);
     let output = orphaned.configured_scan(&config, &["--verbose"]);
     assert_eq!(output.status.code(), Some(1));
@@ -998,7 +1001,7 @@ fn orphaned_vi_rule_flags_only_a_scanned_library_that_omits_the_vi() {
     );
     listed.write(
         "orphaned-example.lvlib",
-        r#"<Library><Item Name="orphan-vi.vi" Type="VI" URL="../orphan-vi.vi"/></Library>"#,
+        r#"<Library><Item Name="Untitled 8" Type="VI"/><Item Name="orphan-vi.vi" Type="VI" URL="../orphan-vi.vi"/></Library>"#,
     );
     let config = listed.write("checks.yaml", rule_config);
     let output = listed.configured_scan(&config, &["--verbose"]);

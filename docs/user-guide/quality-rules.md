@@ -371,6 +371,9 @@ including items nested in folders. These URLs are relative to the library
 file: `../Member.vi` names a VI beside that file. A VI is reported only when
 its referenced library is also scanned and does not list that VI. External,
 absolute/token, and unscanned library paths cannot be checked and are skipped.
+VI items without a `URL` attribute have no saved file path and are skipped
+without rejecting the library or its other members. Explicitly empty URLs
+remain analysis errors; other member URL handling is unchanged.
 
 ```yaml
 rules:
