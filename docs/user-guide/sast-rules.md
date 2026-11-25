@@ -136,5 +136,5 @@ rules:
     enabled: false
 ```
 
-The shared `#wirelint system-exec-command-input` suppression directive skips
+The shared `#wirelint-ignore system-exec-command-input` suppression directive skips
 this rule's command-path extraction for that file.

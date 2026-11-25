@@ -55,7 +55,7 @@ read or parsed. Findings and errors are reported after analysis finishes.
 Add a free label to a VI's block diagram containing exactly:
 
 ```text
-#wirelint file-description
+#wirelint-ignore file-description
 ```
 
 Replace `file-description` with any built-in rule ID. Matching is
@@ -81,8 +81,8 @@ line in the file's native description:
 ```text
 Shared instrument drivers.
 
-#wirelint separate-compiled-code
-#wirelint saved-version
+#wirelint-ignore separate-compiled-code
+#wirelint-ignore saved-version
 ```
 
 Projects use `NI.Project.Description`; libraries and classes use

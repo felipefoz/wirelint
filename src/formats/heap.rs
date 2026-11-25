@@ -612,8 +612,12 @@ mod tests {
     fn reads_only_diagram_free_labels_including_nested_diagrams() {
         let mut heap = Vec::new();
         node(&mut heap, -7, 0, Some(DIAGRAM as i16), &[]);
-        label(&mut heap, Z_PLANE_LIST, b"#wirelint file-description");
-        label(&mut heap, 200, b"#wirelint no-breakpoints");
+        label(
+            &mut heap,
+            Z_PLANE_LIST,
+            b"#wirelint-ignore file-description",
+        );
+        label(&mut heap, 200, b"#wirelint-ignore no-breakpoints");
         label(&mut heap, NODE_LIST, b"not #a-bookmark");
         node(&mut heap, 63, 0, None, &[]);
         node(&mut heap, ARRAY_ELEMENT, 0, Some(DIAGRAM as i16), &[]);
@@ -624,7 +628,10 @@ mod tests {
         let (bookmarks, terminal_icon_styles) = parse_heap(&heap).unwrap();
         assert_eq!(
             bookmarks,
-            vec![b"#wirelint file-description".to_vec(), b"#other".to_vec()]
+            vec![
+                b"#wirelint-ignore file-description".to_vec(),
+                b"#other".to_vec()
+            ]
         );
         assert!(terminal_icon_styles.is_empty());
         heap.pop();
@@ -635,13 +642,20 @@ mod tests {
     fn reads_terminal_icon_styles_in_order_alongside_bookmarks() {
         let mut heap = Vec::new();
         node(&mut heap, -7, 0, Some(DIAGRAM as i16), &[]);
-        label(&mut heap, Z_PLANE_LIST, b"#wirelint file-description");
+        label(
+            &mut heap,
+            Z_PLANE_LIST,
+            b"#wirelint-ignore file-description",
+        );
         terminal(&mut heap, 0x0402_0040); // icon style, matches the confirmed sample bit
         terminal(&mut heap, 0x0002_0040); // data-type style, bit clear
         terminal(&mut heap, 0x0400_0000); // icon style, no other bits set
         node(&mut heap, -7, 2, None, &[]);
         let (bookmarks, terminal_icon_styles) = parse_heap(&heap).unwrap();
-        assert_eq!(bookmarks, vec![b"#wirelint file-description".to_vec()]);
+        assert_eq!(
+            bookmarks,
+            vec![b"#wirelint-ignore file-description".to_vec()]
+        );
         assert_eq!(terminal_icon_styles, vec![true, false, true]);
     }
 

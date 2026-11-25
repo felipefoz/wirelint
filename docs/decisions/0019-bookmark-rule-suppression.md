@@ -13,7 +13,7 @@ XML projects, libraries, and classes have native descriptions but no diagrams.
 
 Read version-b block-diagram heaps from VI-family files and identify free
 labels structurally, including nested diagrams. Interpret an exact
-two-token `#wirelint RULE-ID` label as a per-VI suppression of that enabled
+two-token `#wirelint-ignore RULE-ID` label as a per-VI suppression of that enabled
 rule. For XML files, recognize the same two-token directive on standalone
 lines in the owner's native description (`NI.Project.Description` for projects,
 `NI.Lib.Description` for libraries/classes). Trim surrounding line whitespace;

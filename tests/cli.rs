@@ -298,7 +298,7 @@ fn terminal_style_defaults_to_requiring_data_type_style_and_honors_configuration
 fn bookmark_skips_only_the_named_enabled_rule_and_is_always_reported() {
     let directory = TestDirectory::new();
     // Diagram -> zPlaneList -> free label -> text record -> text.
-    let text = b"#wirelint file-description";
+    let text = b"#wirelint-ignore file-description";
     let mut heap = vec![
         0x10,
         0x18,
@@ -380,16 +380,16 @@ fn xml_description_directives_skip_only_owner_rules_in_both_output_modes() {
         };
         directory.write(&format!("suppressed.{extension}"), format!(
             r#"<{root} LVVersion="19008000">{mutation_history}<Property Name="{property}" Type="Str">Shared drivers.
-#wirelint saved-version
-  #wirelint separate-compiled-code
-#wirelint saved-version
-#wirelint unknown-rule
+#wirelint-ignore saved-version
+  #wirelint-ignore separate-compiled-code
+#wirelint-ignore saved-version
+#wirelint-ignore unknown-rule
 </Property></{root}>"#,
         ));
     }
     directory.write("ordinary.lvproj", r#"<Project LVVersion="20008000">
         <Property Name="NI.LV.All.SourceOnly" Type="Bool">true</Property>
-        <Item><Property Name="NI.Project.Description" Type="Str">#wirelint file-description</Property></Item>
+        <Item><Property Name="NI.Project.Description" Type="Str">#wirelint-ignore file-description</Property></Item>
     </Project>"#);
     for verbose in [false, true] {
         let destination = directory.0.join("report.json");
@@ -451,7 +451,7 @@ fn xml_directives_alone_do_not_satisfy_file_description_or_hide_analysis_errors(
             format!(
                 r#"<{root} LVVersion="19008000">{mutation_history}
                 <Property Name="NI.LV.All.SourceOnly" Type="Bool">true</Property>
-                <Property Name="{property}" Type="Str">#wirelint saved-version</Property>
+                <Property Name="{property}" Type="Str">#wirelint-ignore saved-version</Property>
             </{root}>"#,
             ),
         );
@@ -470,7 +470,7 @@ fn xml_directives_alone_do_not_satisfy_file_description_or_hide_analysis_errors(
         "explicit.lvproj",
         r#"<Project LVVersion="20008000">
         <Property Name="NI.LV.All.SourceOnly" Type="Bool">true</Property>
-        <Property Name="NI.Project.Description" Type="Str">#wirelint file-description</Property>
+        <Property Name="NI.Project.Description" Type="Str">#wirelint-ignore file-description</Property>
     </Project>"#,
     );
     let output = directory.scan(&["--fail-on", "warning"]);
@@ -489,7 +489,7 @@ fn xml_directives_alone_do_not_satisfy_file_description_or_hide_analysis_errors(
     directory.write(
         "broken.lvproj",
         r#"<Project>
-        <Property Name="NI.Project.Description" Type="Str">#wirelint saved-version</Property>
+        <Property Name="NI.Project.Description" Type="Str">#wirelint-ignore saved-version</Property>
     </Project>"#,
     );
     let output = directory.scan(&["--fail-on", "none"]);

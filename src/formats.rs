@@ -197,7 +197,7 @@ pub fn directive_rule(text: &[u8]) -> Option<&[u8]> {
     let mut tokens = text
         .split(|byte| byte.is_ascii_whitespace())
         .filter(|part| !part.is_empty());
-    if tokens.next()? != b"#wirelint" {
+    if tokens.next()? != b"#wirelint-ignore" {
         return None;
     }
     let rule = tokens.next()?;
@@ -388,10 +388,10 @@ mod tests {
     #[test]
     fn xml_directives_are_standalone_owner_description_lines() {
         let xml = br#"<Project>
-            <Property Name="NI.Project.Description" Type="Str">&#35;wirelint saved-version
-                <![CDATA[#wirelint separate-compiled-code]]>
+            <Property Name="NI.Project.Description" Type="Str">&#35;wirelint-ignore saved-version
+                <![CDATA[#wirelint-ignore separate-compiled-code]]>
             </Property>
-            <Item><Property Name="NI.Project.Description" Type="Str">#wirelint file-description</Property></Item>
+            <Item><Property Name="NI.Project.Description" Type="Str">#wirelint-ignore file-description</Property></Item>
         </Project>"#;
         for read_description in [false, true] {
             let (facts, directives) =
@@ -401,15 +401,15 @@ mod tests {
             assert_eq!(
                 directives,
                 vec![
-                    b"#wirelint saved-version".to_vec(),
-                    b"#wirelint separate-compiled-code".to_vec(),
+                    b"#wirelint-ignore saved-version".to_vec(),
+                    b"#wirelint-ignore separate-compiled-code".to_vec(),
                 ]
             );
         }
         let (facts, directives) = xml::read_facts_with_members(
-            br#"<Project><Property Name="NI.Project.Description" Type="Str">Text mentioning #wirelint saved-version
-#wirelint saved-version extra
-#WireLint saved-version</Property></Project>"#,
+            br#"<Project><Property Name="NI.Project.Description" Type="Str">Text mentioning #wirelint-ignore saved-version
+#wirelint-ignore saved-version extra
+#WireLint-ignore saved-version</Property></Project>"#,
             "Project", false, true, false,
         ).unwrap();
         assert_eq!(facts.has_description, Some(true));

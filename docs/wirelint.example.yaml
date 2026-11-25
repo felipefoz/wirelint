@@ -13,7 +13,7 @@ exclude-folders:
 
 rules:
   # In a VI block diagram, a free label such as
-  # "#wirelint file-description" skips that rule for that VI.
+  # "#wirelint-ignore file-description" skips that rule for that VI.
   # XML projects, libraries, and classes accept the same directive on its own
   # line in their native description; directive-only text is not a description.
   # Require separate compiled code from source for VI-family files and

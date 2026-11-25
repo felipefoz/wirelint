@@ -239,14 +239,15 @@ mod tests {
     #[test]
     fn matches_only_complete_rule_directives() {
         for (text, expected) in [
-            ("#wirelint file-description", true),
-            ("#wirelint\tfile-description  ", true),
-            (" #wirelint file-description", false),
-            ("#wirelint file-description-extra", false),
-            ("#wirelint file-description extra", false),
-            ("#wirelint no-breakpoints", false),
-            ("#WireLint file-description", false),
-            ("#todo #wirelint file-description", false),
+            ("#wirelint-ignore file-description", true),
+            ("#wirelint-ignore\tfile-description  ", true),
+            (" #wirelint-ignore file-description", false),
+            ("#wirelint-ignore file-description-extra", false),
+            ("#wirelint-ignore file-description extra", false),
+            ("#wirelint-ignore no-breakpoints", false),
+            ("#WireLint-ignore file-description", false),
+            ("#todo #wirelint-ignore file-description", false),
+            ("#wirelint file-description", false),
         ] {
             assert_eq!(
                 suppresses(text.as_bytes(), "file-description"),
