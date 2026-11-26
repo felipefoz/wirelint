@@ -18,6 +18,7 @@ WireLint is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## Documentation
 
+- [LLM project overview](llms.txt)
 - [Changelog](CHANGELOG.md)
 - [Install from GitHub Releases](docs/user-guide/installation.md)
 - [Getting started and CLI usage](docs/user-guide/cli.md)

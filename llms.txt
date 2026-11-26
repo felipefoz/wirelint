@@ -1,0 +1,263 @@
+# wirelint
+
+> Independent static analysis for LabVIEW files
+
+**Version:** 0.4.0
+**Authors:** WireLint contributors <felipefoz@gmail.com>
+**License:** MIT
+**Repository:** https://github.com/felipefoz/wire-lint
+**Dependencies:**
+- sha2 (0.10)
+- serde_json (1)
+- serde_yaml_ng (0.10)
+- clap (4.6.7) [features: derive]
+- serde (1) [features: derive]
+- flate2 (1)
+- roxmltree (0.21)
+
+Generated: 2026-11-26 17:17:26 UTC  
+Created by: [cargo-llms-txt](https://github.com/masinc/cargo-llms-txt)
+
+## Core Documentation
+
+- [Complete API Documentation](llms-full.txt): Full public API documentation with detailed descriptions
+- [README](README.md): Project overview and getting started guide
+- [Cargo.toml](Cargo.toml): Project configuration and dependencies
+
+## Table of Contents
+
+### src\analysis.rs
+
+- pub struct Finding
+- pub struct AnalysisError
+- pub struct Skipped
+- pub struct Report
+- impl Report
+- pub fn analyze
+
+### src\cli.rs
+
+- pub struct Cli
+- impl From for Format
+- pub fn run
+
+### src\config.rs
+
+- pub enum FailOn
+- impl FailOn
+- pub enum DebuggingState
+- pub enum TerminalDisplayStyle
+- pub enum PathTarget
+- pub const DEFAULT_PATH_TARGETS
+- pub struct RuleConfig
+- pub fn saved_version_bounds
+- pub enum RuleCategory
+- pub struct Config
+- impl Default for Config
+- impl Config
+- impl EffectiveRule
+- impl Config
+
+### src\formats\call_links.rs
+
+- impl Reader
+
+### src\formats\dataflow.rs
+
+- impl Trace
+
+### src\formats\heap\graph.rs
+
+- pub struct DiagramGraph
+- pub struct GraphObject
+- pub struct Signal
+- pub enum GraphIssue
+- impl DiagramGraph
+
+### src\formats\heap\suppression.rs
+
+- pub enum SourceHeap
+- impl SourceHeap
+- pub struct ObjectId
+- pub struct Directive
+
+### src\formats\heap.rs
+
+- pub struct DiagramStringConstant
+- impl NameLabel
+
+### src\formats\path_values.rs
+
+- pub struct PathValue
+- pub enum PathKind
+
+### src\formats\typed_data.rs
+
+- pub struct DefaultStringValue
+
+### src\formats.rs
+
+- pub use heap::DiagramStringConstant
+- pub use heap::suppression::{Directive, ObjectId, SourceHeap}
+- pub use path_values::{PathKind, PathValue}
+- pub use typed_data::DefaultStringValue
+- pub fn read_directives
+- pub fn read_diagram_graph
+- pub struct CallEvidence
+- pub struct Version
+- impl Version
+- impl std::fmt::Display for Version
+- pub struct FileFacts
+- pub fn read_path_values
+- pub fn read_facts
+- pub fn read_facts_with_orphaned_vi
+- pub fn directive_rule
+
+### src\reports.rs
+
+- pub enum Format
+- pub struct ScanTimes
+- pub fn render
+
+### src\rules\quality\path_usage.rs
+
+- impl Rule for PathUsageRule
+
+### src\rules\quality.rs
+
+- pub static BUILT_INS
+- pub const DEFAULT_MINIMUM_VERSION
+- impl Rule for SeparateCompiledCode
+- impl Rule for SavedVersion
+- impl Rule for FileDescription
+- impl Rule for DebuggingStatus
+- impl Rule for NoBreakpoints
+- impl Rule for AutoErrorHandling
+- impl Rule for PasswordSet
+- impl Rule for OrphanedVi
+- impl Rule for ClassMutationHistory
+- impl Rule for TerminalStyle
+- pub static CONNECTOR_PANE_PATTERNS
+- impl Rule for ConnectorPanePattern
+
+### src\rules\sast\hardcoded_secret.rs
+
+- impl Rule for HardcodedSecretDefault
+- impl SecretKind
+
+### src\rules\sast\http.rs
+
+- impl Rule for HttpRule
+
+### src\rules\sast\system_exec.rs
+
+- impl Rule for SystemExecCommandInput
+
+### src\rules\sast.rs
+
+- pub static BUILT_INS
+
+### src\rules.rs
+
+- pub mod quality
+- pub mod sast
+- pub enum Severity
+- impl fmt::Display for Severity
+- pub trait Rule
+
+### src\scan.rs
+
+- pub fn discover_files
+- impl tests::TestDirectory
+- impl Drop for tests::TestDirectory
+
+---
+
+## README.md
+
+### WireLint
+
+[![CI](https://img.shields.io/github/actions/workflow/status/felipefoz/wire-lint/ci.yml?branch=main&label=CI)](https://github.com/felipefoz/wire-lint/actions/workflows/ci.yml)
+![Language: Rust](https://img.shields.io/badge/language-Rust-orange)
+![Status: Beta](https://img.shields.io/badge/status-beta-yellow)
+![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
+![WireLint: LabVIEW static analysis](docs/assets/wirelint-hero.svg)
+
+Static Analysis for LabVIEW.
+
+WireLint aims to provide an independent static-analysis tool for LabVIEW files, similar in purpose to NI's VI Analyzer. It is not affiliated with, endorsed by, or sponsored by National Instruments (NI). LabVIEW is a trademark of NI.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution guidelines.
+
+WireLint is licensed under the MIT License. See [LICENSE](LICENSE).
+
+#### Documentation
+
+- [LLM project overview](llms.txt)
+- [Changelog](CHANGELOG.md)
+- [Install from GitHub Releases](docs/user-guide/installation.md)
+- [Getting started and CLI usage](docs/user-guide/cli.md)
+- [Rule configuration](docs/user-guide/configuration.md)
+- [Quality and hygiene rules](docs/user-guide/quality-rules.md)
+- [Security analysis rules](docs/user-guide/sast-rules.md)
+- [GitLab and GitHub code quality reports](docs/user-guide/ci-reports.md)
+- [Configuration template](docs/wirelint.example.yaml)
+- [Project roadmap](docs/roadmap.md)
+
+#### Security analysis
+
+Run `wirelint security <folder>` to find credentials stored in VI string defaults,
+such as default values of password controls or embedded tokens. See the
+[security rules](docs/user-guide/sast-rules.md) and the security section in the
+[shared configuration template](docs/wirelint.example.yaml).
+
+## Cargo.toml
+
+```toml
+[package]
+name = "wirelint"
+version = "0.4.0"
+edition = "2024"
+license = "MIT"
+description = "Independent static analysis for LabVIEW files"
+repository = "https://github.com/felipefoz/wire-lint"
+readme = "README.md"
+authors = ["WireLint contributors <felipefoz@gmail.com>"]
+
+[package.metadata.deb]
+maintainer = "WireLint contributors <felipefoz@gmail.com>"
+copyright = "2026 WireLint contributors"
+license-file = ["LICENSE", "0"]
+section = "devel"
+priority = "optional"
+depends = "$auto"
+assets = [
+    ["target/release/wirelint", "usr/bin/wirelint", "755"],
+    ["README.md", "usr/share/doc/wirelint/README.md", "644"],
+    ["LICENSE", "usr/share/doc/wirelint/LICENSE", "644"],
+    ["THIRD_PARTY_NOTICES.md", "usr/share/doc/wirelint/THIRD_PARTY_NOTICES.md", "644"],
+]
+
+[package.metadata.wix]
+upgrade-guid = "DD75C4E4-BC5F-41C5-8053-36584EA7A1B8"
+path-guid = "F01D3E10-263B-4956-9C5E-B5DDCF9270E5"
+license = "LICENSE"
+eula = false
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+flate2 = "1"
+roxmltree = "0.21"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+sha2 = "0.10"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+```
+

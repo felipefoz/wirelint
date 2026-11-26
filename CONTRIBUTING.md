@@ -38,6 +38,24 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 Add focused tests for new features and bug fixes.
 
+### LLM context
+
+The generated `llms.txt` and `llms-full.txt` summarize the README, Cargo
+metadata, and Rust source. They are navigation aids, not an authoritative
+description of the public API.
+
+After changing Rust sources, `Cargo.toml`, or `README.md`, regenerate them from
+the repository root:
+
+```text
+cargo install cargo-llms-txt --version 0.1.1 --locked
+cargo llms-txt
+```
+
+Install the generator once; it is a development tool, not a WireLint runtime
+dependency. Review the output before committing it. Generation timestamps,
+file ordering, and path separators can differ between runs and platforms.
+
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 Tests must run from a clean checkout without LabVIEW or ignored sandbox files.

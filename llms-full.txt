@@ -1,0 +1,1169 @@
+# wirelint - Complete API Documentation
+
+> Independent static analysis for LabVIEW files
+
+**Version:** 0.4.0
+**Authors:** WireLint contributors <felipefoz@gmail.com>
+**License:** MIT
+**Repository:** https://github.com/felipefoz/wire-lint
+**Dependencies:**
+- sha2 (0.10)
+- serde_json (1)
+- serde_yaml_ng (0.10)
+- clap (4.6.7) [features: derive]
+- serde (1) [features: derive]
+- flate2 (1)
+- roxmltree (0.21)
+
+Generated: 2026-11-26 17:17:26 UTC  
+Created by: [cargo-llms-txt](https://github.com/masinc/cargo-llms-txt)
+
+## Table of Contents
+
+### src\analysis.rs
+
+- pub struct Finding
+- pub struct AnalysisError
+- pub struct Skipped
+- pub struct Report
+- impl Report
+- pub fn analyze
+
+### src\cli.rs
+
+- pub struct Cli
+- impl From for Format
+- pub fn run
+
+### src\config.rs
+
+- pub enum FailOn
+- impl FailOn
+- pub enum DebuggingState
+- pub enum TerminalDisplayStyle
+- pub enum PathTarget
+- pub const DEFAULT_PATH_TARGETS
+- pub struct RuleConfig
+- pub fn saved_version_bounds
+- pub enum RuleCategory
+- pub struct Config
+- impl Default for Config
+- impl Config
+- impl EffectiveRule
+- impl Config
+
+### src\formats\call_links.rs
+
+- impl Reader
+
+### src\formats\dataflow.rs
+
+- impl Trace
+
+### src\formats\heap\graph.rs
+
+- pub struct DiagramGraph
+- pub struct GraphObject
+- pub struct Signal
+- pub enum GraphIssue
+- impl DiagramGraph
+
+### src\formats\heap\suppression.rs
+
+- pub enum SourceHeap
+- impl SourceHeap
+- pub struct ObjectId
+- pub struct Directive
+
+### src\formats\heap.rs
+
+- pub struct DiagramStringConstant
+- impl NameLabel
+
+### src\formats\path_values.rs
+
+- pub struct PathValue
+- pub enum PathKind
+
+### src\formats\typed_data.rs
+
+- pub struct DefaultStringValue
+
+### src\formats.rs
+
+- pub use heap::DiagramStringConstant
+- pub use heap::suppression::{Directive, ObjectId, SourceHeap}
+- pub use path_values::{PathKind, PathValue}
+- pub use typed_data::DefaultStringValue
+- pub fn read_directives
+- pub fn read_diagram_graph
+- pub struct CallEvidence
+- pub struct Version
+- impl Version
+- impl std::fmt::Display for Version
+- pub struct FileFacts
+- pub fn read_path_values
+- pub fn read_facts
+- pub fn read_facts_with_orphaned_vi
+- pub fn directive_rule
+
+### src\reports.rs
+
+- pub enum Format
+- pub struct ScanTimes
+- pub fn render
+
+### src\rules\quality\path_usage.rs
+
+- impl Rule for PathUsageRule
+
+### src\rules\quality.rs
+
+- pub static BUILT_INS
+- pub const DEFAULT_MINIMUM_VERSION
+- impl Rule for SeparateCompiledCode
+- impl Rule for SavedVersion
+- impl Rule for FileDescription
+- impl Rule for DebuggingStatus
+- impl Rule for NoBreakpoints
+- impl Rule for AutoErrorHandling
+- impl Rule for PasswordSet
+- impl Rule for OrphanedVi
+- impl Rule for ClassMutationHistory
+- impl Rule for TerminalStyle
+- pub static CONNECTOR_PANE_PATTERNS
+- impl Rule for ConnectorPanePattern
+
+### src\rules\sast\hardcoded_secret.rs
+
+- impl Rule for HardcodedSecretDefault
+- impl SecretKind
+
+### src\rules\sast\http.rs
+
+- impl Rule for HttpRule
+
+### src\rules\sast\system_exec.rs
+
+- impl Rule for SystemExecCommandInput
+
+### src\rules\sast.rs
+
+- pub static BUILT_INS
+
+### src\rules.rs
+
+- pub mod quality
+- pub mod sast
+- pub enum Severity
+- impl fmt::Display for Severity
+- pub trait Rule
+
+### src\scan.rs
+
+- pub fn discover_files
+- impl tests::TestDirectory
+- impl Drop for tests::TestDirectory
+
+---
+
+## README.md
+
+### WireLint
+
+[![CI](https://img.shields.io/github/actions/workflow/status/felipefoz/wire-lint/ci.yml?branch=main&label=CI)](https://github.com/felipefoz/wire-lint/actions/workflows/ci.yml)
+![Language: Rust](https://img.shields.io/badge/language-Rust-orange)
+![Status: Beta](https://img.shields.io/badge/status-beta-yellow)
+![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
+![WireLint: LabVIEW static analysis](docs/assets/wirelint-hero.svg)
+
+Static Analysis for LabVIEW.
+
+WireLint aims to provide an independent static-analysis tool for LabVIEW files, similar in purpose to NI's VI Analyzer. It is not affiliated with, endorsed by, or sponsored by National Instruments (NI). LabVIEW is a trademark of NI.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution guidelines.
+
+WireLint is licensed under the MIT License. See [LICENSE](LICENSE).
+
+#### Documentation
+
+- [LLM project overview](llms.txt)
+- [Changelog](CHANGELOG.md)
+- [Install from GitHub Releases](docs/user-guide/installation.md)
+- [Getting started and CLI usage](docs/user-guide/cli.md)
+- [Rule configuration](docs/user-guide/configuration.md)
+- [Quality and hygiene rules](docs/user-guide/quality-rules.md)
+- [Security analysis rules](docs/user-guide/sast-rules.md)
+- [GitLab and GitHub code quality reports](docs/user-guide/ci-reports.md)
+- [Configuration template](docs/wirelint.example.yaml)
+- [Project roadmap](docs/roadmap.md)
+
+#### Security analysis
+
+Run `wirelint security <folder>` to find credentials stored in VI string defaults,
+such as default values of password controls or embedded tokens. See the
+[security rules](docs/user-guide/sast-rules.md) and the security section in the
+[shared configuration template](docs/wirelint.example.yaml).
+
+---
+
+## src\analysis.rs
+
+### Finding
+
+```rust
+#[derive(Debug)]
+pub struct Finding {
+    pub path: PathBuf,
+    pub rule: &'static str,
+    pub severity: Severity,
+    pub message: String,
+}
+```
+
+A rule violation associated with one scan-relative file path.
+
+### AnalysisError
+
+```rust
+#[derive(Debug)]
+pub struct AnalysisError {
+    pub path: PathBuf,
+    pub message: String,
+}
+```
+
+A file that could not be analyzed; never represented as a passing check.
+
+### Skipped
+
+```rust
+#[derive(Debug)]
+pub struct Skipped {
+    pub path: PathBuf,
+    pub rule: &'static str,
+    pub object: Option<formats::ObjectId>,
+}
+```
+
+An enabled rule suppressed by a directive in the same file.
+
+### Report
+
+```rust
+#[derive(Debug, Default)]
+pub struct Report {
+    pub analyzed: usize,
+    pub findings: Vec<Finding>,
+    pub errors: Vec<AnalysisError>,
+    pub skipped: Vec<Skipped>,
+}
+```
+
+Findings and errors accumulated in discovery/registry order.
+
+### impl Report
+
+```rust
+impl Report {
+    pub fn exit_status(&self, fail_on: FailOn) -> u8;
+}
+```
+
+
+### analyze
+
+```rust
+pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, category: RuleCategory, rules: &[&dyn Trait]) -> Report
+```
+
+Reads each file once and runs every enabled rule over the extracted facts.
+
+File errors are recorded and scanning continues. When all rules are disabled,
+discovered files are not read and the analyzed count is zero. `rules` is
+the active registry for the selected command.
+
+
+## src\cli.rs
+
+### Cli
+
+```rust
+#[derive(Debug, Parser)]
+pub struct Cli {
+}
+```
+
+
+### impl From<ScanFormat> for Format
+
+```rust
+impl From<ScanFormat> for Format {
+}
+```
+
+
+### run
+
+```rust
+pub fn run(cli: Cli, output: &mut impl Trait, errors: &mut impl Trait) -> io::Result<u8>
+```
+
+Executes the command and returns the process status, propagating I/O errors.
+
+
+## src\config.rs
+
+### FailOn
+
+```rust
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, ValueEnum)]
+pub enum FailOn {
+    Error,
+    Warning,
+    None,
+}
+```
+
+Findings at or above this level cause exit status 1; analysis errors always fail.
+
+### impl FailOn
+
+```rust
+impl FailOn {
+    pub fn exceeded_by(self, severity: Severity) -> bool;
+}
+```
+
+
+### DebuggingState
+
+```rust
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub enum DebuggingState {
+    Enabled,
+    Disabled,
+}
+```
+
+Debugging state that produces a finding, independent of rule enablement.
+
+### TerminalDisplayStyle
+
+```rust
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub enum TerminalDisplayStyle {
+    DataType,
+    Icon,
+}
+```
+
+Preferred front-panel terminal display style, independent of rule enablement.
+
+### PathTarget
+
+```rust
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
+pub enum PathTarget {
+    Windows,
+    Linux,
+}
+```
+
+Filesystem syntax checked by the path-usage rule.
+
+### DEFAULT_PATH_TARGETS
+
+```rust
+pub const DEFAULT_PATH_TARGETS: [PathTarget; N]
+```
+
+Platforms checked when the path rule has no explicit targets.
+
+### RuleConfig
+
+```rust
+#[derive(Debug, Deserialize)]
+pub struct RuleConfig {
+    pub enabled: bool,
+    pub severity: Option<Severity>,
+    pub minimum_version: Option<Version>,
+    pub maximum_version: Option<Version>,
+    pub fail_when: Option<DebuggingState>,
+    pub preferred_style: Option<TerminalDisplayStyle>,
+    pub allowed_patterns: Option<Vec<String>>,
+    pub targets: Option<Vec<PathTarget>>,
+}
+```
+
+Common options and validated options for individual built-in rules.
+
+### saved_version_bounds
+
+```rust
+pub fn saved_version_bounds(options: Option<&RuleConfig>) -> (Option<Version>, Option<Version>)
+```
+
+Resolves saved-version bounds, including the maximum-only exception.
+
+### RuleCategory
+
+```rust
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuleCategory {
+    Lint,
+    Security,
+}
+```
+
+Selects which rule section supplies overrides for a command.
+
+### Config
+
+```rust
+#[derive(Debug, Deserialize)]
+pub struct Config {
+    pub fail_on: FailOn,
+    pub exclude_folders: Vec<String>,
+}
+```
+
+Versioned configuration with all built-ins enabled unless overridden.
+
+### impl Default for Config
+
+```rust
+impl Default for Config {
+}
+```
+
+
+### impl Config
+
+```rust
+impl Config {
+    pub fn load_for(path: &Path, category: RuleCategory) -> io::Result<Self>;
+    pub fn check_file(path: &Path) -> io::Result<()>;
+    pub fn load_all(path: &Path) -> io::Result<Self>;
+    pub fn effective_yaml(&self) -> io::Result<String>;
+}
+```
+
+
+### impl EffectiveRule
+
+```rust
+impl<'a> EffectiveRule {
+}
+```
+
+
+### impl Config
+
+```rust
+impl Config {
+    pub fn rules(&self, category: RuleCategory) -> &BTreeMap<String, RuleConfig>;
+}
+```
+
+
+
+## src\formats\call_links\tests.rs
+
+
+## src\formats\call_links.rs
+
+### impl Reader
+
+```rust
+impl<'a> Reader {
+}
+```
+
+
+
+## src\formats\connector.rs
+
+
+## src\formats\dataflow.rs
+
+### impl Trace
+
+```rust
+impl<'a> Trace {
+}
+```
+
+
+
+## src\formats\heap\graph\tests.rs
+
+
+## src\formats\heap\graph.rs
+
+### DiagramGraph
+
+```rust
+#[derive(Debug)]
+pub struct DiagramGraph {
+    pub objects: BTreeMap<i32, GraphObject>,
+    pub signals: BTreeMap<i32, Signal>,
+    pub issues: Vec<GraphIssue>,
+}
+```
+
+Saved object definitions and wire nets, with unresolved topology kept visible.
+
+### GraphObject
+
+```rust
+#[derive(Debug)]
+pub struct GraphObject {
+    pub class: i32,
+    pub parent: Option<i32>,
+    pub flags: Option<u32>,
+    pub dco: Option<i32>,
+    pub primitive_id: Option<i32>,
+    pub call_slot: Option<i32>,
+    pub primitive_slot: Option<i32>,
+    pub constant_value: Option<Vec<u8>>,
+    pub constant_display: Option<i32>,
+    pub ambiguous_constant_display: bool,
+}
+```
+
+One heap object; numeric identities and flags have no inferred semantics.
+
+### Signal
+
+```rust
+#[derive(Debug)]
+pub struct Signal {
+    pub diagram: i32,
+    pub terminals: Vec<i32>,
+    pub state: Option<i32>,
+}
+```
+
+A saved signal is a net with any number of endpoints, not a pairwise edge.
+
+### GraphIssue
+
+```rust
+#[derive(Debug, Eq, PartialEq)]
+pub enum GraphIssue {
+    TooFewEndpoints { signal: i32 },
+    UnresolvedTerminal { signal: i32, terminal: i32 },
+    NonTerminalEndpoint { signal: i32, object: i32 },
+    CrossDiagramEndpoint { signal: i32, terminal: i32 },
+    DuplicateEndpoint { signal: i32, terminal: i32 },
+    SharedTerminal { terminal: i32, first: i32, second: i32 },
+}
+```
+
+Evidence that prevents interpreting a saved net as fully resolved topology.
+
+### impl DiagramGraph
+
+```rust
+impl DiagramGraph {
+}
+```
+
+
+
+## src\formats\heap\suppression.rs
+
+### SourceHeap
+
+```rust
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum SourceHeap {
+    Diagram,
+    FrontPanel,
+}
+```
+
+UID namespace of a saved source object.
+
+### impl SourceHeap
+
+```rust
+impl SourceHeap {
+    pub fn name(self) -> &'static str;
+}
+```
+
+
+### ObjectId
+
+```rust
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ObjectId {
+    pub heap: SourceHeap,
+    pub uid: i32,
+}
+```
+
+A source object's identity; names and coordinates are not identifiers.
+
+### Directive
+
+```rust
+#[derive(Debug)]
+pub struct Directive {
+    pub text: Vec<u8>,
+    pub object: Option<ObjectId>,
+}
+```
+
+Exact directive text with a resolved arrow target, or a file-wide scope.
+
+
+## src\formats\heap.rs
+
+### DiagramStringConstant
+
+```rust
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiagramStringConstant {
+    pub object: Option<super::ObjectId>,
+    pub label: Option<Vec<u8>>,
+    pub bytes: Vec<u8>,
+}
+```
+
+A scalar diagram string constant's saved value and optional object label.
+
+### impl NameLabel
+
+```rust
+impl NameLabel {
+}
+```
+
+
+
+## src\formats\path_values.rs
+
+### PathValue
+
+```rust
+#[derive(Clone, Debug)]
+pub struct PathValue {
+    pub object: Option<super::ObjectId>,
+    pub label: Option<Vec<u8>>,
+    pub constant: bool,
+    pub kind: PathKind,
+    pub components: Vec<Vec<u8>>,
+}
+```
+
+One scalar path value and the source object that owns it.
+
+### PathKind
+
+```rust
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PathKind {
+    Absolute,
+    Relative,
+    NotAPath,
+    Unc,
+}
+```
+
+LabVIEW's stored path categories, independent of the scanning host.
+
+
+## src\formats\rsrc.rs
+
+
+## src\formats\typed_data.rs
+
+### DefaultStringValue
+
+```rust
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DefaultStringValue {
+    pub object: Option<super::ObjectId>,
+    pub type_index: usize,
+    pub field_path: Vec<usize>,
+    pub labels: Vec<Vec<u8>>,
+    pub bytes: Vec<u8>,
+}
+```
+
+A raw string default and its location among the VI's front-panel controls.
+
+
+## src\formats\xml.rs
+
+
+## src\formats.rs
+
+### heap::DiagramStringConstant
+
+```rust
+pub use heap::DiagramStringConstant;
+```
+
+
+### heap::suppression::{Directive, ObjectId, SourceHeap}
+
+```rust
+pub use heap::suppression::{Directive, ObjectId, SourceHeap};
+```
+
+
+### path_values::{PathKind, PathValue}
+
+```rust
+pub use path_values::{PathKind, PathValue};
+```
+
+
+### typed_data::DefaultStringValue
+
+```rust
+pub use typed_data::DefaultStringValue;
+```
+
+
+### read_directives
+
+```rust
+pub fn read_directives(path: &Path, bytes: &[u8], bookmarks: Vec<Vec<u8>>) -> io::Result<Vec<Directive>>
+```
+
+Resolves VI comment arrows; XML description directives remain file-wide.
+
+Invalid or ambiguous saved references return an analysis error, never a
+file-wide fallback. Unlinked front-panel labels do not supply directives.
+
+### read_diagram_graph
+
+```rust
+pub fn read_diagram_graph(bytes: &[u8]) -> io::Result<Option<heap::graph::DiagramGraph>>
+```
+
+Extracts saved diagram topology on demand, without launching LabVIEW.
+
+Missing source is `None`; unresolved connections are graph issues, not proof
+of safety. This foundation does not resolve callees or perform taint analysis.
+
+### CallEvidence
+
+```rust
+#[derive(Debug, Default)]
+pub struct CallEvidence {
+    pub calls: Vec<i32>,
+    pub incomplete: Vec<(i32, String)>,
+}
+```
+
+Generic per-rule call evidence and unresolved input paths.
+
+### Version
+
+```rust
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct Version {
+    pub major: u8,
+    pub minor: u8,
+}
+```
+
+LabVIEW major and minor release numbers, ordered numerically.
+
+### impl Version
+
+```rust
+impl Version {
+    pub fn parse(text: &str) -> Option<Self>;
+}
+```
+
+
+### impl std::fmt::Display for Version
+
+```rust
+impl std::fmt::Display for Version {
+}
+```
+
+
+### FileFacts
+
+```rust
+#[derive(Debug)]
+pub struct FileFacts {
+    pub path_values: Option<Vec<PathValue>>,
+    pub call_inputs: std::collections::BTreeMap<&'static str, CallEvidence>,
+    pub separate_compiled_code: bool,
+    pub has_description: Option<bool>,
+    pub saved_version: Option<Version>,
+    pub debugging_enabled: Option<bool>,
+    pub has_breakpoints: Option<bool>,
+    pub auto_error_handling: Option<bool>,
+    pub has_password: Option<bool>,
+    pub linked_library: Option<PathBuf>,
+    pub library_members: Option<Vec<String>>,
+    pub orphaned_vi: Option<bool>,
+    pub has_mutation_history: Option<bool>,
+    pub terminal_icon_styles: Option<Vec<bool>>,
+    pub connector_pane_pattern: Option<u8>,
+    pub default_string_values: Option<Vec<DefaultStringValue>>,
+    pub diagram_string_values: Option<Vec<DiagramStringConstant>>,
+}
+```
+
+Facts shared by all rules; extracted once for each analyzed file.
+
+### read_path_values
+
+```rust
+pub fn read_path_values(path: &Path, bytes: &[u8]) -> io::Result<Option<Vec<PathValue>>>
+```
+
+Reads path values from VI source heaps without using the host filesystem.
+
+### read_facts
+
+```rust
+pub fn read_facts(path: &Path, bytes: &[u8], read_version: bool, read_description: bool, read_password: bool) -> io::Result<FileFacts>
+```
+
+Reads a VI-family RSRC file or an XML project/library/class document.
+
+Missing XML source-only or description properties mean false. When
+`read_version` is true, missing or malformed version metadata is an error.
+When `read_password` is true, malformed BDPW metadata is an error.
+XML owner descriptions are always validated to extract suppression directives.
+Malformed documents and unsupported binary layouts return `InvalidData`,
+never an assumed value.
+
+### read_facts_with_orphaned_vi
+
+```rust
+pub fn read_facts_with_orphaned_vi(path: &Path, bytes: &[u8], read_version: bool, read_description: bool, read_password: bool, read_orphaned_vi: bool, read_connector_pane_pattern: bool, read_default_strings: bool) -> io::Result<(FileFacts, Vec<Vec<u8>>)>
+```
+
+Reads facts and suppression directives, optionally extracting library links.
+
+### directive_rule
+
+```rust
+pub fn directive_rule(text: &[u8]) -> Option<&[u8]>
+```
+
+Extracts the rule ID from an exact, case-sensitive two-token directive.
+
+The `#` must be the first byte. Only ASCII whitespace separates tokens.
+
+
+## src\main.rs
+
+
+## src\reports.rs
+
+### Format
+
+```rust
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum Format {
+    Gitlab,
+    GitlabSast,
+    Sarif,
+}
+```
+
+Supported machine reports; destinations are selected separately by the CLI.
+
+### ScanTimes
+
+```rust
+#[derive(Clone, Copy, Debug)]
+pub struct ScanTimes {
+    pub started_at: SystemTime,
+    pub finished_at: SystemTime,
+}
+```
+
+Wall-clock bounds for one completed analysis pass.
+
+### render
+
+```rust
+pub fn render(report: &Report, format: Format, rules: &[&dyn Trait], times: ScanTimes) -> io::Result<Vec<u8>>
+```
+
+Serializes a complete report as UTF-8 JSON without a BOM.
+
+Paths remain relative to the scan root. Rejects non-UTF-8 paths rather than
+emitting ambiguous lossy names. Analysis errors are SARIF invocation failures
+and GitLab SAST scan messages, not rule findings; GitLab Code Quality
+consumers must also check the process exit status.
+`rules` is the registry that produced `report`; SARIF lists its full rule
+metadata, including any CWE tags, independent of which rules produced findings.
+
+
+## src\rules\quality\path_usage.rs
+
+### impl Rule for PathUsageRule
+
+```rust
+impl Rule for PathUsageRule {
+}
+```
+
+
+
+## src\rules\quality.rs
+
+### BUILT_INS
+
+```rust
+pub static BUILT_INS: &[&dyn Trait]
+```
+
+All built-in quality and hygiene rules, run by `wirelint lint`.
+
+### DEFAULT_MINIMUM_VERSION
+
+```rust
+pub const DEFAULT_MINIMUM_VERSION: Version
+```
+
+Default minimum release for saved LabVIEW files.
+
+### impl Rule for SeparateCompiledCode
+
+```rust
+impl Rule for SeparateCompiledCode {
+}
+```
+
+
+### impl Rule for SavedVersion
+
+```rust
+impl Rule for SavedVersion {
+}
+```
+
+
+### impl Rule for FileDescription
+
+```rust
+impl Rule for FileDescription {
+}
+```
+
+
+### impl Rule for DebuggingStatus
+
+```rust
+impl Rule for DebuggingStatus {
+}
+```
+
+
+### impl Rule for NoBreakpoints
+
+```rust
+impl Rule for NoBreakpoints {
+}
+```
+
+
+### impl Rule for AutoErrorHandling
+
+```rust
+impl Rule for AutoErrorHandling {
+}
+```
+
+
+### impl Rule for PasswordSet
+
+```rust
+impl Rule for PasswordSet {
+}
+```
+
+
+### impl Rule for OrphanedVi
+
+```rust
+impl Rule for OrphanedVi {
+}
+```
+
+
+### impl Rule for ClassMutationHistory
+
+```rust
+impl Rule for ClassMutationHistory {
+}
+```
+
+
+### impl Rule for TerminalStyle
+
+```rust
+impl Rule for TerminalStyle {
+}
+```
+
+
+### CONNECTOR_PANE_PATTERNS
+
+```rust
+pub static CONNECTOR_PANE_PATTERNS: [(&str, u8); N]
+```
+
+Name and terminal count of each of LabVIEW's 36 fixed connector pane
+patterns, indexed by the pattern's catalog offset (its raw `pattern`
+field, from the VI's own Function TypeDesc, right-shifted by 3).
+
+### impl Rule for ConnectorPanePattern
+
+```rust
+impl Rule for ConnectorPanePattern {
+}
+```
+
+
+
+## src\rules\sast\hardcoded_secret.rs
+
+### impl Rule for HardcodedSecretDefault
+
+```rust
+impl Rule for HardcodedSecretDefault {
+}
+```
+
+
+### impl SecretKind
+
+```rust
+impl SecretKind {
+}
+```
+
+
+
+## src\rules\sast\http.rs
+
+### impl Rule for HttpRule
+
+```rust
+impl Rule for HttpRule {
+}
+```
+
+
+
+## src\rules\sast\system_exec.rs
+
+### impl Rule for SystemExecCommandInput
+
+```rust
+impl Rule for SystemExecCommandInput {
+}
+```
+
+
+
+## src\rules\sast.rs
+
+### BUILT_INS
+
+```rust
+pub static BUILT_INS: &[&dyn Trait]
+```
+
+All built-in security rules, run by `wirelint security`.
+
+
+## src\rules.rs
+
+### Severity
+
+```rust
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, Ord, PartialEq, PartialOrd)]
+pub enum Severity {
+    Info,
+    Warning,
+    Error,
+}
+```
+
+Ordered finding severity, independent of the configured failure threshold.
+
+### impl fmt::Display for Severity
+
+```rust
+impl fmt::Display for Severity {
+}
+```
+
+
+### Rule
+
+```rust
+pub trait Rule: Sync {
+    fn id(&self) -> &'static str;
+    fn description(&self) -> &'static str;
+    fn default_severity(&self) -> Severity;
+    fn supports_call_suppression(&self) -> bool;
+    fn check(&self, facts: &FileFacts, options: Option<&RuleConfig>) -> Option<String>;
+    fn cwe(&self) -> &'static [&'static str];
+}
+```
+
+Stateless analysis of facts extracted once by the format layer.
+
+Rules do not read files, print output, or decide process exit status.
+
+
+## src\scan.rs
+
+### discover_files
+
+```rust
+pub fn discover_files(root: &Path, exclude_folders: &[String]) -> io::Result<Vec<PathBuf>>
+```
+
+Finds supported LabVIEW file candidates under `root`.
+
+Traversal is recursive, skips symbolic links and excluded child directories,
+and returns paths relative to `root` in sorted order. Exclusions match literal
+folder names case-sensitively at every depth; the root itself is never excluded.
+
+#### Errors
+
+Returns an error if `root` is not a directory or any filesystem operation
+fails during traversal.
+
+### impl TestDirectory
+
+```rust
+impl TestDirectory {
+}
+```
+
+
+### impl Drop for TestDirectory
+
+```rust
+impl Drop for TestDirectory {
+}
+```
+
+
+
