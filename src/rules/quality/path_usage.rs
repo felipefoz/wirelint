@@ -1,7 +1,7 @@
 //! Warn about nonportable or hardcoded scalar LabVIEW paths.
 
 use crate::config::{DEFAULT_PATH_TARGETS, PathTarget, RuleConfig};
-use crate::formats::{FileFacts, PathKind, PathUsage};
+use crate::formats::{FileFacts, PathKind, PathValue};
 use crate::rules::{Rule, Severity};
 
 /// Checks scalar path constants and front-panel defaults.
@@ -22,7 +22,7 @@ impl Rule for PathUsageRule {
         let targets = options
             .and_then(|options| options.targets.as_deref())
             .unwrap_or(&DEFAULT_PATH_TARGETS);
-        let mut findings = facts.path_usage.iter().flatten().filter_map(|path| {
+        let mut findings = facts.path_values.iter().flatten().filter_map(|path| {
             let reason = classify(path, targets)?;
             let kind = if path.constant {
                 "path constant"
@@ -51,7 +51,7 @@ impl Rule for PathUsageRule {
 }
 
 /// Classifies a stored value without consulting the local filesystem.
-fn classify(path: &PathUsage, targets: &[PathTarget]) -> Option<&'static str> {
+fn classify(path: &PathValue, targets: &[PathTarget]) -> Option<&'static str> {
     if path.kind == PathKind::NotAPath {
         return None;
     }
@@ -118,8 +118,8 @@ fn safe_label(label: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn value(kind: PathKind, constant: bool, components: &[&[u8]]) -> PathUsage {
-        PathUsage {
+    fn value(kind: PathKind, constant: bool, components: &[&[u8]]) -> PathValue {
+        PathValue {
             object: None,
             label: None,
             constant,

@@ -160,7 +160,7 @@ pub fn analyze(
                 }
             }
             if read_paths {
-                facts.path_usage = formats::read_path_usage(path, &bytes)?;
+                facts.path_values = formats::read_path_values(path, &bytes)?;
             }
             Ok((facts, directives))
         });
@@ -249,7 +249,7 @@ fn suppress_object(facts: &mut formats::FileFacts, rule: &str, object: formats::
         values.len() != count
     }
     match rule {
-        "path-usage" => remove(&mut facts.path_usage, |value| value.object == Some(object)),
+        "path-usage" => remove(&mut facts.path_values, |value| value.object == Some(object)),
         "hardcoded-secret-default" => {
             let defaults = remove(&mut facts.default_string_values, |value| {
                 value.object == Some(object)

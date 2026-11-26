@@ -97,11 +97,13 @@ impl<'a> Trace<'a> {
                 if value.len() < 4 {
                     return Err("truncated string constant");
                 }
-                let len = u32::from_be_bytes(value[..4].try_into().unwrap()) as usize;
-                if len != value.len() - 4 {
+                let mut cursor = 0;
+                let string = super::read_flattened_string(value, &mut cursor)
+                    .map_err(|_| "invalid string constant length")?;
+                if cursor != value.len() {
                     return Err("invalid string constant length");
                 }
-                Ok(Some(Scalar::String(&value[4..])))
+                Ok(Some(Scalar::String(string)))
             }
             _ => Err("unsupported or ambiguous scalar constant type"),
         }

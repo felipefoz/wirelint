@@ -188,7 +188,7 @@ pub(super) fn read_directives(bytes: &[u8]) -> io::Result<Vec<super::Directive>>
 }
 
 /// Reads scalar path objects from the saved source heaps, not compiled data.
-pub(super) fn read_path_usage(bytes: &[u8]) -> io::Result<Vec<super::PathUsage>> {
+pub(super) fn read_path_values(bytes: &[u8]) -> io::Result<Vec<super::PathValue>> {
     let resources = resources(bytes)?;
     if !resources.is_vi {
         return Ok(Vec::new());
@@ -557,7 +557,7 @@ pub(super) fn read_facts_with_orphaned_vi(
     };
     Ok((
         FileFacts {
-            path_usage: None,
+            path_values: None,
             call_inputs: Default::default(),
             separate_compiled_code,
             has_description,

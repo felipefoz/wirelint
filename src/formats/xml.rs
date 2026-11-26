@@ -156,7 +156,7 @@ pub(super) fn read_facts_with_members(
             connector_pane_pattern: None,
             default_string_values: None,
             diagram_string_values: None,
-            path_usage: None,
+            path_values: None,
         },
         directives,
     ))

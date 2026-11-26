@@ -25,6 +25,9 @@ string bytes.
 - Treat missing, ambiguous, truncated, or trailing scalar string `ConstValue`
   data as an analysis error. Older VIs may not store a constant's value in
   the source heap; compiled blocks are not used as a fallback.
+- Share flattened-string decoding between diagram constants, front-panel
+  defaults and call-input analysis. Require complete consumption for scalar
+  constants, while allowing following values in composite control defaults.
 
 ## Alternatives
 

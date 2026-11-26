@@ -411,9 +411,9 @@ fn parse_diagram_strings(bytes: &[u8]) -> io::Result<Vec<DiagramStringConstant>>
                 let data = constant
                     .data
                     .ok_or_else(|| invalid("string constant has no ConstValue"))?;
-                let length = rsrc::number(data, 0)?;
-                let value = rsrc::slice(data, 4, length)?;
-                if length != data.len() - 4 {
+                let mut cursor = 0;
+                let value = super::read_flattened_string(data, &mut cursor)?;
+                if cursor != data.len() {
                     return Err(invalid("string constant has trailing ConstValue data"));
                 }
                 strings.push(DiagramStringConstant {
@@ -461,7 +461,7 @@ pub(super) fn read_paths(
     count_minus_one: usize,
     section_offset: usize,
     diagram: bool,
-) -> io::Result<Vec<super::PathUsage>> {
+) -> io::Result<Vec<super::PathValue>> {
     let name = if diagram { "BDHb" } else { "FPHb" };
     let heap = read_heap(
         name,
@@ -475,7 +475,7 @@ pub(super) fn read_paths(
 }
 
 /// Collects only `stdPath` objects, excluding dedicated fixed constants.
-fn parse_paths(bytes: &[u8], diagram: bool) -> io::Result<Vec<super::PathUsage>> {
+fn parse_paths(bytes: &[u8], diagram: bool) -> io::Result<Vec<super::PathValue>> {
     struct OpenPath {
         uid: Option<i32>,
         depth: usize,
@@ -511,7 +511,7 @@ fn parse_paths(bytes: &[u8], diagram: bool) -> io::Result<Vec<super::PathUsage>>
                 match object.data {
                     Some(data) => {
                         let mut path =
-                            super::path_usage::decode(&data, object.name.label, diagram)?;
+                            super::path_values::decode(&data, object.name.label, diagram)?;
                         path.object = object.uid.map(|uid| super::ObjectId {
                             heap: if diagram {
                                 super::SourceHeap::Diagram

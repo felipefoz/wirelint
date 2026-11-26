@@ -8,7 +8,7 @@ use std::io;
 
 /// One scalar path value and the source object that owns it.
 #[derive(Clone, Debug)]
-pub struct PathUsage {
+pub struct PathValue {
     pub object: Option<super::ObjectId>,
     pub label: Option<Vec<u8>>,
     pub constant: bool,
@@ -26,7 +26,7 @@ pub enum PathKind {
 }
 
 /// Parses a single complete flattened PTH0, PTH1, or PTH2 value.
-pub(super) fn decode(data: &[u8], label: Option<Vec<u8>>, constant: bool) -> io::Result<PathUsage> {
+pub(super) fn decode(data: &[u8], label: Option<Vec<u8>>, constant: bool) -> io::Result<PathValue> {
     let ident = rsrc::slice(data, 0, 4)?;
     let length = rsrc::number(data, 4)?;
     let body_length = if ident == b"PTH0" && length == 0 {
@@ -83,7 +83,7 @@ pub(super) fn decode(data: &[u8], label: Option<Vec<u8>>, constant: bool) -> io:
     {
         return Err(invalid("inconsistent flattened path components"));
     }
-    Ok(PathUsage {
+    Ok(PathValue {
         object: None,
         label,
         constant,

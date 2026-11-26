@@ -766,7 +766,7 @@ mod tests {
             terminal_icon_styles: None,
             connector_pane_pattern: None,
             default_string_values: Some(values),
-            path_usage: None,
+            path_values: None,
             diagram_string_values: Some(Vec::new()),
         }
     }

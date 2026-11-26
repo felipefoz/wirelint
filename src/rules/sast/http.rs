@@ -390,6 +390,25 @@ mod tests {
     }
 
     #[test]
+    fn malformed_string_constants_are_incomplete() {
+        let bytes = fixture("http-plaintext-url", "GET HTTP Literal.vi");
+        let links = formats::read_call_links(Path::new("x.vi"), &bytes)
+            .unwrap()
+            .unwrap();
+        for value in [
+            vec![0, 0, 0],
+            vec![0, 0, 0, 2, b'a'],
+            vec![0, 0, 0, 1, b'a', b'b'],
+        ] {
+            let mut graph = formats::read_diagram_graph(&bytes).unwrap().unwrap();
+            graph.objects.get_mut(&20183).unwrap().constant_value = Some(value);
+            let result = analyze(&links, Some(&graph), [true; 3]);
+            assert!(result.plaintext_url.calls.is_empty());
+            assert_eq!(result.plaintext_url.incomplete.len(), 1);
+        }
+    }
+
+    #[test]
     fn requires_an_explicit_https_scheme_and_reports_unknown_transfers() {
         let bytes = fixture("http-plaintext-url", "GET HTTP Literal.vi");
         for (url, expected) in [

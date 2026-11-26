@@ -4,7 +4,7 @@ mod call_links;
 mod connector;
 pub(crate) mod dataflow;
 mod heap;
-mod path_usage;
+mod path_values;
 mod rsrc;
 mod typed_data;
 mod xml;
@@ -15,7 +15,7 @@ pub(crate) use heap::graph::DiagramGraph;
 #[cfg(test)]
 pub(crate) use heap::graph::{GraphIssue, GraphObject};
 pub use heap::suppression::{Directive, ObjectId, SourceHeap};
-pub use path_usage::{PathKind, PathUsage};
+pub use path_values::{PathKind, PathValue};
 pub use typed_data::DefaultStringValue;
 
 use std::io;
@@ -127,7 +127,7 @@ impl std::fmt::Display for Version {
 #[derive(Debug)]
 pub struct FileFacts {
     /// Path constants and scalar control defaults, when requested.
-    pub path_usage: Option<Vec<PathUsage>>,
+    pub path_values: Option<Vec<PathValue>>,
     /// Evidence for enabled call-oriented rules, keyed by rule ID.
     pub call_inputs: std::collections::BTreeMap<&'static str, CallEvidence>,
     pub separate_compiled_code: bool,
@@ -162,7 +162,7 @@ pub struct FileFacts {
 }
 
 /// Reads path values from VI source heaps without using the host filesystem.
-pub fn read_path_usage(path: &Path, bytes: &[u8]) -> io::Result<Option<Vec<PathUsage>>> {
+pub fn read_path_values(path: &Path, bytes: &[u8]) -> io::Result<Option<Vec<PathValue>>> {
     let extension = path.extension().and_then(|value| value.to_str());
     if !extension.is_some_and(|extension| {
         ["vi", "vit", "vim"]
@@ -171,7 +171,20 @@ pub fn read_path_usage(path: &Path, bytes: &[u8]) -> io::Result<Option<Vec<PathU
     }) {
         return Ok(None);
     }
-    rsrc::read_path_usage(bytes).map(Some)
+    rsrc::read_path_values(bytes).map(Some)
+}
+
+/// Reads a length-prefixed flattened string and advances past it on success.
+///
+/// Truncated or out-of-range data returns `InvalidData` without moving the cursor.
+fn read_flattened_string<'a>(bytes: &'a [u8], cursor: &mut usize) -> io::Result<&'a [u8]> {
+    let length = rsrc::number(bytes, *cursor)?;
+    let start = cursor
+        .checked_add(4)
+        .ok_or_else(|| invalid("RSRC range overflow"))?;
+    let value = rsrc::slice(bytes, start, length)?;
+    *cursor = start + length;
+    Ok(value)
 }
 
 /// Reads a VI-family RSRC file or an XML project/library/class document.
@@ -269,6 +282,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn flattened_strings_are_bounded_and_can_be_read_from_a_stream() {
+        let bytes = b"x\0\0\0\x03a\0b\0\0\0\0";
+        let mut cursor = 1;
+        assert_eq!(read_flattened_string(bytes, &mut cursor).unwrap(), b"a\0b");
+        assert_eq!(read_flattened_string(bytes, &mut cursor).unwrap(), b"");
+        assert_eq!(cursor, bytes.len());
+        for bytes in [b"\0\0\0".as_slice(), b"\0\0\0\x02a"] {
+            let mut cursor = 0;
+            assert!(read_flattened_string(bytes, &mut cursor).is_err());
+            assert_eq!(cursor, 0);
+        }
+    }
+
+    #[test]
     fn saved_bookmark_arrows_identify_the_same_objects_as_value_extraction() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests")
@@ -287,7 +314,7 @@ mod tests {
                 .object
                 .unwrap();
             if rule == "path-usage" {
-                let values = read_path_usage(&path, &bytes).unwrap().unwrap();
+                let values = read_path_values(&path, &bytes).unwrap().unwrap();
                 assert!(
                     values.iter().any(|value| value.object == Some(target)),
                     "target {target:?}; values {values:?}"

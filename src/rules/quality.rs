@@ -411,7 +411,7 @@ mod tests {
                     terminal_icon_styles: None,
                     connector_pane_pattern: None,
                     default_string_values: None,
-                    path_usage: None,
+                    path_values: None,
                     diagram_string_values: None,
                 },
                 None
@@ -436,7 +436,7 @@ mod tests {
                     terminal_icon_styles: None,
                     connector_pane_pattern: None,
                     default_string_values: None,
-                    path_usage: None,
+                    path_values: None,
                     diagram_string_values: None,
                 },
                 None
@@ -494,7 +494,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             assert_eq!(rule.check(&facts, None).is_some(), violation);
@@ -598,7 +598,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             let options = RuleConfig {
@@ -639,7 +639,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             assert_eq!(rule.check(&facts, None).is_some(), violation);
@@ -665,7 +665,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             assert_eq!(
@@ -720,7 +720,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             assert_eq!(NoBreakpoints.check(&facts, None).is_some(), expected);
@@ -747,7 +747,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             assert_eq!(PasswordSet.check(&facts, None).is_some(), expected);
@@ -776,7 +776,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             assert_eq!(AutoErrorHandling.check(&facts, None).is_some(), expected);
@@ -803,7 +803,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             assert_eq!(OrphanedVi.check(&facts, None).is_some(), expected);
@@ -832,7 +832,7 @@ mod tests {
                 terminal_icon_styles: None,
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             assert_eq!(ClassMutationHistory.check(&facts, None).is_some(), expected);
@@ -866,7 +866,7 @@ mod tests {
                 terminal_icon_styles,
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             assert_eq!(TerminalStyle.check(&facts, None).is_some(), expected);
@@ -897,7 +897,7 @@ mod tests {
                 terminal_icon_styles: Some(terminal_icon_styles),
                 connector_pane_pattern: None,
                 default_string_values: None,
-                path_usage: None,
+                path_values: None,
                 diagram_string_values: None,
             };
             let options = RuleConfig {
@@ -935,7 +935,7 @@ mod tests {
             terminal_icon_styles: None,
             connector_pane_pattern,
             default_string_values: None,
-            path_usage: None,
+            path_values: None,
             diagram_string_values: None,
         }
     }

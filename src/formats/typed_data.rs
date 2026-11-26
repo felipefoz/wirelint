@@ -184,8 +184,7 @@ fn walk_fill(
             },
         ),
         0x30 | 0x33 | 0x37 => {
-            let length = read_u32(data, cursor)?;
-            let bytes = take(data, cursor, length)?.to_vec();
+            let bytes = super::read_flattened_string(data, cursor)?.to_vec();
             output.push(DefaultStringValue {
                 object: None,
                 type_index: walk.type_index,

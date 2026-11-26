@@ -22,6 +22,8 @@ path constants even when their values match.
 - Read only source `BDHb` and `FPHb` heaps and decode `PTH0`, `PTH1`, and
   `PTH2` with bounded lengths. Malformed path records produce analysis errors.
   Report the first offending object and a count of other offending values.
+- Keep saved-path decoding and extracted values generic in the format layer;
+  apply portability policy in the `path-usage` rule.
 - Initially inspect scalar objects only; array and cluster values and runtime
   path construction are not analyzed. Front-panel indicator defaults are
   included. The dedicated Not a Path node is covered by a synthetic heap test,
