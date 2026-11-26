@@ -79,6 +79,33 @@ enum Command {
         #[arg(long, value_name = "FILE", requires = "format")]
         output: Option<PathBuf>,
     },
+    /// Create, check, or display configuration without scanning files.
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    /// Check a configuration file's schema and rule categories.
+    Check {
+        /// YAML configuration file to validate.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+    },
+    /// Create a configuration from the full example; never overwrite a file.
+    Init {
+        /// Destination YAML file; parent directory must exist.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+    },
+    /// Show effective configuration as YAML, including built-in defaults.
+    Show {
+        /// Optional YAML configuration file; no automatic discovery.
+        #[arg(value_name = "FILE")]
+        file: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -142,6 +169,48 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             output,
             errors,
         ),
+        Command::Config {
+            command: ConfigCommand::Check { file },
+        } => {
+            Config::check_file(&file)?;
+            writeln!(output, "Configuration '{}' is valid.", file.display())?;
+            Ok(0)
+        }
+        Command::Config {
+            command: ConfigCommand::Init { file },
+        } => {
+            let mut destination = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&file)
+                .map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("configuration '{}': {error}", file.display()),
+                    )
+                })?;
+            destination
+                .write_all(include_bytes!("../docs/wirelint.example.yaml"))
+                .map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("configuration '{}': {error}", file.display()),
+                    )
+                })?;
+            writeln!(output, "Created configuration '{}'.", file.display())?;
+            Ok(0)
+        }
+        Command::Config {
+            command: ConfigCommand::Show { file },
+        } => {
+            let config = file
+                .as_deref()
+                .map(Config::load_all)
+                .transpose()?
+                .unwrap_or_default();
+            write!(output, "{}", config.effective_yaml()?)?;
+            Ok(0)
+        }
     }
 }
 

@@ -36,10 +36,20 @@ traversal. The [configuration template](../wirelint.example.yaml) excludes
 ## Rules and configuration
 
 ```text
+wirelint config check checks.yaml
+wirelint config init checks.yaml
+wirelint config show [checks.yaml]
 wirelint lint path/to/project --config checks.yaml
 wirelint lint path/to/project --fail-on warning
 wirelint security path/to/project --config checks.yaml
 ```
+
+`config check` validates the YAML schema, shared settings, and rule categories
+without discovering or scanning LabVIEW files. It exits with status `2` and a
+configuration error for invalid files.
+`config init` writes the full example to a new file and refuses to overwrite
+an existing file. `config show` prints effective YAML including defaults for
+both rule categories. Without a file, it shows the built-in defaults.
 
 `lint` replaces the former `scan` command; update existing scripts to use
 `lint`. `sast` remains an alias for the primary `security` command.

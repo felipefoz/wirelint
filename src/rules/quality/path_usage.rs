@@ -1,6 +1,6 @@
 //! Warn about nonportable or hardcoded scalar LabVIEW paths.
 
-use crate::config::{PathTarget, RuleConfig};
+use crate::config::{DEFAULT_PATH_TARGETS, PathTarget, RuleConfig};
 use crate::formats::{FileFacts, PathKind, PathUsage};
 use crate::rules::{Rule, Severity};
 
@@ -19,10 +19,9 @@ impl Rule for PathUsageRule {
     }
 
     fn check(&self, facts: &FileFacts, options: Option<&RuleConfig>) -> Option<String> {
-        let defaults = [PathTarget::Windows, PathTarget::Linux];
         let targets = options
             .and_then(|options| options.targets.as_deref())
-            .unwrap_or(&defaults);
+            .unwrap_or(&DEFAULT_PATH_TARGETS);
         let mut findings = facts.path_usage.iter().flatten().filter_map(|path| {
             let reason = classify(path, targets)?;
             let kind = if path.constant {

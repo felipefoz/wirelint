@@ -1839,6 +1839,191 @@ fn invalid_or_missing_configuration_fails_before_scanning() {
 }
 
 #[test]
+fn config_check_validates_without_scanning_and_rejects_bad_categories() {
+    let directory = TestDirectory::new();
+    directory.write("broken.vi", b"not a LabVIEW file");
+    let config = directory.write("checks.yaml", include_str!("../docs/wirelint.example.yaml"));
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .args(["config", "check"])
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("Configuration")
+    );
+
+    let invalid = directory.write(
+        "misplaced.yaml",
+        "security:\n  rules:\n    separate-compiled-code: {}\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .args(["config", "check"])
+        .arg(invalid)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("separate-compiled-code")
+    );
+}
+
+#[test]
+fn config_init_creates_example_without_overwriting() {
+    let directory = TestDirectory::new();
+    let path = directory.0.join("checks.yaml");
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_wirelint"))
+            .args(["config", "init"])
+            .arg(&path)
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        include_bytes!("../docs/wirelint.example.yaml")
+    );
+    let output = run();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!output.stderr.is_empty());
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        include_bytes!("../docs/wirelint.example.yaml")
+    );
+}
+
+#[test]
+fn config_show_outputs_effective_yaml_and_validates_input() {
+    let directory = TestDirectory::new();
+    let show = |path: Option<&Path>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_wirelint"));
+        command.args(["config", "show"]);
+        if let Some(path) = path {
+            command.arg(path);
+        }
+        command.output().unwrap()
+    };
+    let output = show(None);
+    assert!(output.status.success());
+    let defaults: serde_yaml_ng::Value = serde_yaml_ng::from_slice(&output.stdout).unwrap();
+    assert_eq!(defaults["fail-on"].as_str(), Some("error"));
+    assert_eq!(defaults["exclude-folders"].as_sequence().unwrap().len(), 0);
+    assert_eq!(
+        defaults["lint"]["rules"]["saved-version"]["minimum-version"].as_str(),
+        Some("20.0")
+    );
+    assert!(
+        defaults["lint"]["rules"]["connector-pane-pattern"]
+            .get("allowed-patterns")
+            .is_none()
+    );
+    assert_eq!(
+        defaults["lint"]["rules"]["path-usage"]["targets"]
+            .as_sequence()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        defaults["security"]["rules"]["hardcoded-secret-default"]["enabled"].as_bool(),
+        Some(true)
+    );
+    let defaults_file = directory.write("defaults.yaml", &output.stdout);
+    let check = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .args(["config", "check"])
+        .arg(defaults_file)
+        .output()
+        .unwrap();
+    assert!(check.status.success());
+
+    let file = directory.write("checks.yaml", "fail-on: warning\nexclude-folders: [cache]\nlint:\n  rules:\n    saved-version:\n      maximum-version: '21.0'\n    debugging-status:\n      enabled: false\n      fail-when: disabled\n    terminal-style:\n      preferred-style: icon\n    connector-pane-pattern:\n      allowed-patterns: ['4x2x2x4']\n    path-usage:\n      targets: [linux]\nsecurity:\n  rules:\n    hardcoded-secret-default:\n      severity: error\n");
+    let output = show(Some(&file));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let config: serde_yaml_ng::Value = serde_yaml_ng::from_slice(&output.stdout).unwrap();
+    assert_eq!(config["fail-on"].as_str(), Some("warning"));
+    assert_eq!(config["exclude-folders"][0].as_str(), Some("cache"));
+    assert!(
+        config["lint"]["rules"]["saved-version"]
+            .get("minimum-version")
+            .is_none()
+    );
+    assert_eq!(
+        config["lint"]["rules"]["saved-version"]["maximum-version"].as_str(),
+        Some("21.0")
+    );
+    assert_eq!(
+        config["lint"]["rules"]["debugging-status"]["enabled"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        config["lint"]["rules"]["debugging-status"]["fail-when"].as_str(),
+        Some("disabled")
+    );
+    assert_eq!(
+        config["lint"]["rules"]["terminal-style"]["preferred-style"].as_str(),
+        Some("icon")
+    );
+    assert_eq!(
+        config["lint"]["rules"]["connector-pane-pattern"]["allowed-patterns"][0].as_str(),
+        Some("4x2x2x4")
+    );
+    assert_eq!(
+        config["lint"]["rules"]["path-usage"]["targets"][0].as_str(),
+        Some("linux")
+    );
+    assert_eq!(
+        config["security"]["rules"]["hardcoded-secret-default"]["severity"].as_str(),
+        Some("error")
+    );
+    let rendered = directory.write("rendered.yaml", &output.stdout);
+    let check = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .args(["config", "check"])
+        .arg(rendered)
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let legacy = directory.write(
+        "legacy.yaml",
+        "rules:\n  hardcoded-secret-default:\n    enabled: false\n",
+    );
+    let output = show(Some(&legacy));
+    assert!(output.status.success());
+    let config: serde_yaml_ng::Value = serde_yaml_ng::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        config["security"]["rules"]["hardcoded-secret-default"]["enabled"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        config["lint"]["rules"]["separate-compiled-code"]["enabled"].as_bool(),
+        Some(true)
+    );
+    let invalid = directory.write(
+        "invalid.yaml",
+        "security:\n  rules:\n    separate-compiled-code: {}\n",
+    );
+    let output = show(Some(&invalid));
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(!output.stderr.is_empty());
+}
+
+#[test]
 fn security_and_sast_run_the_same_analysis() {
     let directory = TestDirectory::new();
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))

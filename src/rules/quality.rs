@@ -1,6 +1,6 @@
 //! Built-in quality and source-control hygiene rules.
 
-use crate::config::{DebuggingState, RuleConfig, TerminalDisplayStyle};
+use crate::config::{DebuggingState, RuleConfig, TerminalDisplayStyle, saved_version_bounds};
 use crate::formats::{FileFacts, Version};
 use crate::rules::{Rule, Severity};
 
@@ -67,10 +67,7 @@ impl Rule for SavedVersion {
     }
 
     fn check(&self, facts: &FileFacts, options: Option<&RuleConfig>) -> Option<String> {
-        let maximum = options.and_then(|options| options.maximum_version);
-        let minimum = options
-            .and_then(|options| options.minimum_version)
-            .or_else(|| maximum.is_none().then_some(DEFAULT_MINIMUM_VERSION));
+        let (minimum, maximum) = saved_version_bounds(options);
         let version = facts
             .saved_version
             .expect("active version rule requires a version fact");

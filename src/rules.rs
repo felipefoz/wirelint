@@ -5,11 +5,11 @@ pub mod sast;
 
 use crate::config::RuleConfig;
 use crate::formats::FileFacts;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Ordered finding severity, independent of the configured failure threshold.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, Ord, PartialEq, PartialOrd)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Info,

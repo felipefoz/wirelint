@@ -5,14 +5,14 @@ use crate::rules::quality::BUILT_INS as QUALITY_BUILT_INS;
 use crate::rules::sast::BUILT_INS as SECURITY_BUILT_INS;
 use crate::rules::{Rule, Severity};
 use clap::ValueEnum;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::Path;
 
 /// Findings at or above this level cause exit status 1; analysis errors always fail.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum FailOn {
     #[default]
@@ -33,7 +33,7 @@ impl FailOn {
 }
 
 /// Debugging state that produces a finding, independent of rule enablement.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum DebuggingState {
     #[default]
@@ -42,7 +42,7 @@ pub enum DebuggingState {
 }
 
 /// Preferred front-panel terminal display style, independent of rule enablement.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum TerminalDisplayStyle {
     #[default]
@@ -51,12 +51,15 @@ pub enum TerminalDisplayStyle {
 }
 
 /// Filesystem syntax checked by the path-usage rule.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum PathTarget {
     Windows,
     Linux,
 }
+
+/// Platforms checked when the path rule has no explicit targets.
+pub const DEFAULT_PATH_TARGETS: [PathTarget; 2] = [PathTarget::Windows, PathTarget::Linux];
 
 /// Common options and validated options for individual built-in rules.
 #[derive(Debug, Deserialize)]
@@ -77,6 +80,19 @@ pub struct RuleConfig {
     pub allowed_patterns: Option<Vec<String>>,
     #[serde(default, deserialize_with = "path_targets")]
     pub targets: Option<Vec<PathTarget>>,
+}
+
+/// Resolves saved-version bounds, including the maximum-only exception.
+pub fn saved_version_bounds(options: Option<&RuleConfig>) -> (Option<Version>, Option<Version>) {
+    let maximum = options.and_then(|options| options.maximum_version);
+    let minimum = options
+        .and_then(|options| options.minimum_version)
+        .or_else(|| {
+            maximum
+                .is_none()
+                .then_some(crate::rules::quality::DEFAULT_MINIMUM_VERSION)
+        });
+    (minimum, maximum)
 }
 
 /// Rejects null, empty, and duplicate target lists.
@@ -287,7 +303,8 @@ impl Config {
     /// for the selected command; no ancestor discovery. Returns path-qualified
     /// I/O/schema errors for invalid options or rule IDs.
     pub fn load_for(path: &Path, category: RuleCategory) -> io::Result<Self> {
-        let result = fs::read_to_string(path).and_then(|text| Self::parse_for(&text, category));
+        let result =
+            fs::read_to_string(path).and_then(|text| Self::parse_for(&text, Some(category)));
         result.map_err(|error| {
             io::Error::new(
                 error.kind(),
@@ -296,15 +313,140 @@ impl Config {
         })
     }
 
+    /// Validates a configuration file without selecting a command or scanning.
+    pub fn check_file(path: &Path) -> io::Result<()> {
+        Self::load_all(path).map(|_| ())
+    }
+
+    /// Loads and validates both categories, inferring the category of legacy rules.
+    pub fn load_all(path: &Path) -> io::Result<Self> {
+        let result = fs::read_to_string(path).and_then(|text| Self::parse_for(&text, None));
+        result.map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("configuration '{}': {error}", path.display()),
+            )
+        })
+    }
+
+    /// Returns YAML with effective defaults and overrides for both rule categories.
+    pub fn effective_yaml(&self) -> io::Result<String> {
+        let legacy_category = self
+            .legacy_rules
+            .as_ref()
+            .map(infer_legacy_category)
+            .transpose()?;
+        let section = |category| {
+            let overrides = if legacy_category == Some(category) {
+                self.legacy_rules
+                    .as_ref()
+                    .expect("legacy category requires rules")
+            } else {
+                match category {
+                    RuleCategory::Lint => &self.lint.rules,
+                    RuleCategory::Security => &self.security.rules,
+                }
+            };
+            EffectiveSection {
+                rules: registry(category)
+                    .iter()
+                    .map(|rule| {
+                        let options = overrides.get(rule.id());
+                        (rule.id(), EffectiveRule::new(*rule, options))
+                    })
+                    .collect(),
+            }
+        };
+        let effective = EffectiveConfig {
+            version: self.version,
+            fail_on: self.fail_on,
+            exclude_folders: &self.exclude_folders,
+            lint: section(RuleCategory::Lint),
+            security: section(RuleCategory::Security),
+        };
+        serde_yaml_ng::to_string(&effective).map_err(io::Error::other)
+    }
+
     /// Deserializes and validates a complete configuration against both registries.
     #[cfg(test)]
     fn parse(text: &str) -> io::Result<Self> {
-        Self::parse_for(text, RuleCategory::Lint)
+        Self::parse_for(text, Some(RuleCategory::Lint))
     }
+}
 
+#[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct EffectiveConfig<'a> {
+    version: u32,
+    fail_on: FailOn,
+    exclude_folders: &'a [String],
+    lint: EffectiveSection<'a>,
+    security: EffectiveSection<'a>,
+}
+
+#[derive(Serialize)]
+struct EffectiveSection<'a> {
+    rules: BTreeMap<&'static str, EffectiveRule<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct EffectiveRule<'a> {
+    enabled: bool,
+    severity: Severity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    minimum_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    maximum_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fail_when: Option<DebuggingState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    preferred_style: Option<TerminalDisplayStyle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowed_patterns: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    targets: Option<&'a [PathTarget]>,
+}
+
+impl<'a> EffectiveRule<'a> {
+    /// Resolves rule-specific options using the same defaults as analysis.
+    fn new(rule: &dyn Rule, options: Option<&'a RuleConfig>) -> Self {
+        let (minimum, maximum) = if rule.id() == "saved-version" {
+            saved_version_bounds(options)
+        } else {
+            (None, None)
+        };
+        Self {
+            enabled: options.is_none_or(|options| options.enabled),
+            severity: options
+                .and_then(|options| options.severity)
+                .unwrap_or_else(|| rule.default_severity()),
+            minimum_version: minimum.map(|version| version.to_string()),
+            maximum_version: maximum.map(|version| version.to_string()),
+            fail_when: (rule.id() == "debugging-status").then(|| {
+                options
+                    .and_then(|options| options.fail_when)
+                    .unwrap_or_default()
+            }),
+            preferred_style: (rule.id() == "terminal-style").then(|| {
+                options
+                    .and_then(|options| options.preferred_style)
+                    .unwrap_or_default()
+            }),
+            allowed_patterns: options.and_then(|options| options.allowed_patterns.as_deref()),
+            targets: (rule.id() == "path-usage").then(|| {
+                options
+                    .and_then(|options| options.targets.as_deref())
+                    .unwrap_or(&DEFAULT_PATH_TARGETS)
+            }),
+        }
+    }
+}
+
+impl Config {
     /// Deserializes and validates a complete YAML configuration against an
-    /// explicit command category.
-    fn parse_for(text: &str, category: RuleCategory) -> io::Result<Self> {
+    /// optional command category for legacy top-level rule maps.
+    fn parse_for(text: &str, category: Option<RuleCategory>) -> io::Result<Self> {
         let config: Self = serde_yaml_ng::from_str(text)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         if config.version != 1 {
@@ -337,6 +479,9 @@ impl Config {
         validate_rules(&config.lint.rules, QUALITY_BUILT_INS)?;
         validate_rules(&config.security.rules, SECURITY_BUILT_INS)?;
         if let Some(legacy_rules) = &config.legacy_rules {
+            let category = category
+                .map(Ok)
+                .unwrap_or_else(|| infer_legacy_category(legacy_rules))?;
             validate_rules(legacy_rules, registry(category))?;
         }
         Ok(config)
@@ -361,6 +506,24 @@ fn registry(category: RuleCategory) -> &'static [&'static dyn Rule] {
     match category {
         RuleCategory::Lint => QUALITY_BUILT_INS,
         RuleCategory::Security => SECURITY_BUILT_INS,
+    }
+}
+
+/// Infers the legacy command category, rejecting rule maps that mix registries.
+fn infer_legacy_category(rules: &BTreeMap<String, RuleConfig>) -> io::Result<RuleCategory> {
+    let has_lint_rule = rules
+        .keys()
+        .any(|id| QUALITY_BUILT_INS.iter().any(|rule| rule.id() == id));
+    let has_security_rule = rules
+        .keys()
+        .any(|id| SECURITY_BUILT_INS.iter().any(|rule| rule.id() == id));
+    match (has_lint_rule, has_security_rule) {
+        (true, true) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "top-level 'rules' cannot mix lint and security rules; use 'lint.rules' and 'security.rules'",
+        )),
+        (false, true) => Ok(RuleCategory::Security),
+        _ => Ok(RuleCategory::Lint),
     }
 }
 
@@ -595,6 +758,26 @@ mod tests {
             let error = Config::parse(yaml).unwrap_err();
             assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{yaml}");
         }
+    }
+
+    #[test]
+    fn config_check_infers_legacy_registry_and_rejects_mixed_rules() {
+        for yaml in [
+            "rules:\n  separate-compiled-code: {}",
+            "rules:\n  hardcoded-secret-default: {}",
+        ] {
+            Config::parse_for(yaml, None).unwrap();
+        }
+        let error = Config::parse_for(
+            "rules:\n  separate-compiled-code: {}\n  hardcoded-secret-default: {}",
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("cannot mix lint and security rules")
+        );
     }
 
     #[test]

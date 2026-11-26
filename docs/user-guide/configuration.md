@@ -12,6 +12,32 @@ wirelint lint path/to/project --config checks.yaml
 There is no automatic configuration-file discovery. The configuration path is
 relative to the current working directory, not the scanned folder.
 
+Check a configuration before scanning:
+
+```text
+wirelint config check checks.yaml
+```
+
+This validates the complete file, including both rule registries, without
+reading any LabVIEW files.
+
+Create an example configuration or display the effective configuration:
+
+```text
+wirelint config init checks.yaml
+wirelint config show checks.yaml
+wirelint config show
+```
+
+`init` requires a destination whose parent exists and never overwrites an
+existing file. The example excludes `.git` and `.lv-venv` and sets a connector
+pane pattern, so it differs from the built-in defaults. `show` validates its
+optional file and prints YAML with defaults and overrides for both categories.
+Without a file, it shows built-in defaults without discovering a config file.
+For legacy top-level rules, it places the overrides in their inferred category.
+The output omits `allowed-patterns` when no connector pane restriction applies
+and omits absent version bounds.
+
 ## Configuration template
 
 Copy [`wirelint.example.yaml`](../wirelint.example.yaml) as a starting point,
@@ -29,8 +55,9 @@ wirelint security path/to/project --config docs/wirelint.example.yaml
 ```
 
 The [configuration template](../wirelint.example.yaml) lists every rule in both
-registries with its default options. Rust tests check that it stays complete
-and matches those defaults. Adjust `enabled` and `severity` in your copy to
+registries. Rust tests check the listed rules and their default severities.
+The connector pane pattern is an example restriction, not a built-in default.
+Adjust `enabled` and `severity` in your copy to
 select the checks and levels for your project. It excludes folders named
 `.git` and `.lv-venv` at any depth.
 
