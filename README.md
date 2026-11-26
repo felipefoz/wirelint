@@ -35,3 +35,37 @@ Run `wirelint security <folder>` to find credentials stored in VI string default
 such as default values of password controls or embedded tokens. See the
 [security rules](docs/user-guide/sast-rules.md) and the security section in the
 [shared configuration template](docs/wirelint.example.yaml).
+
+
+
+# WireLint
+
+> Independent static analysis for LabVIEW files.
+
+WireLint analyzes LabVIEW files for quality, hygiene,
+and security issues.
+
+## Getting Started
+
+- [Project overview](README.md): What WireLint does and how to get started.
+- [Installation](docs/user-guide/installation.md): Install WireLint from GitHub releases.
+- [CLI usage](docs/user-guide/cli.md): Commands, arguments, and examples.
+
+## User Documentation
+
+- [Configuration](docs/user-guide/configuration.md): Configure rules and scan behavior.
+- [Quality rules](docs/user-guide/quality-rules.md): Available quality and hygiene checks.
+- [Security rules](docs/user-guide/sast-rules.md): Security analysis and detected issues.
+- [CI reports](docs/user-guide/ci-reports.md): GitLab and GitHub Code Quality integration.
+- [Configuration template](docs/wirelint.example.yaml): Complete example configuration.
+
+## Developer Documentation
+
+- [Contributing](CONTRIBUTING.md): Development setup and contribution guidelines.
+- [Changelog](CHANGELOG.md): Release history and changes.
+- [Roadmap](docs/roadmap.md): Planned features.
+
+## API Reference
+
+- [Complete Rust API](llms-full.txt): Generated API documentation.
+
