@@ -93,3 +93,16 @@ security:
     system-exec-command-input:
       enabled: true
       severity: warning
+
+    # Review control-influenced HTTP destinations and URLs without proven HTTPS.
+    http-control-url:
+      enabled: true
+      severity: warning
+    http-plaintext-url:
+      enabled: true
+      severity: warning
+
+    # Review explicitly disabled HTTP server certificate verification.
+    http-server-verification:
+      enabled: true
+      severity: warning

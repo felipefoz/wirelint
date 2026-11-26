@@ -72,7 +72,9 @@ controls or constants, key/value assignments, URL credentials, private keys,
 and well-known token formats. `system-exec-command-input` reviews front-panel
 control influence on NI System Exec's command line through direct wires or
 Concatenate Strings. Unsupported command paths are analysis errors, not
-passing checks. SAST findings
+passing checks. HTTP rules review control-influenced URLs, URLs without a
+proven HTTPS scheme, and explicitly disabled server verification. Unsupported
+input paths are analysis errors. SAST findings
 indicate content that needs review, not confirmed
 exploitable vulnerabilities. See the
 [security rule reference](sast-rules.md#hardcoded-secret-default).

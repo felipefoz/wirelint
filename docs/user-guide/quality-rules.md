@@ -74,7 +74,8 @@ skipped, so a directive does not suppress format or I/O errors.
 
 ### Ignoring one object with a comment arrow
 
-For `path-usage`, `hardcoded-secret-default`, and `system-exec-command-input`,
+For `path-usage`, `hardcoded-secret-default`, `system-exec-command-input`,
+`http-control-url`, `http-plaintext-url`, and `http-server-verification`,
 use the same directive in a free label and attach its LabVIEW comment arrow to
 the object being exempted. WireLint resolves the saved attachment reference,
 not the label's position, name, or visual proximity.

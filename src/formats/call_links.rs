@@ -10,7 +10,7 @@ const MAX_LINKS: usize = 100_000;
 
 /// A saved static callee and the diagram node UIDs that reference it.
 #[derive(Debug)]
-pub(super) struct CallLink {
+pub(crate) struct CallLink {
     pub name: Vec<Vec<u8>>,
     pub path: Vec<String>,
     pub nodes: Vec<i32>,

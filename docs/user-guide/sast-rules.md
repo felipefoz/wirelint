@@ -2,8 +2,8 @@
 
 Security rules run with `wirelint security` and are listed separately from the
 quality and source-control hygiene rules used by `wirelint lint`. They read
-stored facts from LabVIEW files. The System Exec rule follows a limited set
-of local block-diagram connections.
+stored facts from LabVIEW files. The System Exec and HTTP rules follow a
+limited set of local block-diagram connections.
 Findings are review signals, not confirmation of exploitability.
 
 All security rules are enabled by default and use the shared `enabled` and
@@ -15,6 +15,9 @@ All security rules are enabled by default and use the shared `enabled` and
 
 - [hardcoded-secret-default](#hardcoded-secret-default)
 - [system-exec-command-input](#system-exec-command-input)
+- [http-control-url](#http-control-url)
+- [http-plaintext-url](#http-plaintext-url)
+- [http-server-verification](#http-server-verification)
 
 ## `hardcoded-secret-default`
 
@@ -142,3 +145,44 @@ System Exec call node to suppress only that call's finding. An arrow to an input
 control does not suppress downstream calls. Command-path extraction still runs;
 neither form hides incomplete-analysis errors. See
 [object-scoped ignores](quality-rules.md#ignoring-one-object-with-a-comment-arrow).
+
+## HTTP Client rules
+
+These rules inspect static NI `LabVIEWHTTPClient.lvlib` calls in VI-family
+resources. All default to `warning` and accept the shared `enabled` and
+`severity` settings. They do not execute calls or print URL values.
+
+### `http-control-url`
+
+Reports front-panel control influence on a request URL directly or through
+Concatenate Strings (CWE-918). Review whether the caller can control the
+destination and whether an allowlist is needed. A finding is not proof of SSRF.
+
+### `http-plaintext-url`
+
+Reports a directly wired literal request URL without an explicit `https://`
+prefix, and control-influenced URLs whose scheme is not statically established (CWE-319). The latter are review signals, not proof of plaintext traffic.
+Other literal-only constructions, including concatenation, are incomplete
+analysis rather than assumed safe. HTTPS alone does not establish that server
+certificate validation is enabled.
+
+### `http-server-verification`
+
+Reports a directly wired `false` on `OpenHandle.vi` or `ConfigSSL.vi`'s
+`verify server` input (CWE-295). An unwired input uses the NI VI's `true`
+default. `false` means verification is disabled; it does not establish that
+the request uses plaintext HTTP. Nonconstant values are incomplete analysis.
+Later configuration changes and whether a handle is actually used are not
+traced.
+
+The request checks recognize NI GET, HEAD, DELETE, POST and PUT client VIs,
+including their file, buffer and multipart variants, when saved as supported
+static call links. URL slot 5 and verification slot 12 were checked against
+LabVIEW 2024. The graph reader supports direct inputs and Concatenate Strings
+for influence; it does not follow subVI bodies, tunnels, variables, dynamic
+calls, redirects or sanitizers. A missing graph, ambiguous wiring, unsupported
+transfer or unsupported saved link layout produces an analysis error, even
+with `--fail-on none`. Absence of a finding is not a security guarantee.
+
+For these rules, a linked ignore arrow suppresses only the referenced call;
+unlinked diagram ignores are file-wide. Neither suppresses analysis errors.

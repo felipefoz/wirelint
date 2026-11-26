@@ -111,6 +111,12 @@ pub fn analyze(
     let read_command_inputs = active
         .iter()
         .any(|(rule, _, _)| rule.id() == "system-exec-command-input");
+    let http_enabled = [
+        "http-control-url",
+        "http-plaintext-url",
+        "http-server-verification",
+    ]
+    .map(|id| active.iter().any(|(rule, _, _)| rule.id() == id));
     let read_paths = active.iter().any(|(rule, _, _)| rule.id() == "path-usage");
     let mut analyzed_files = Vec::new();
     for path in files {
@@ -126,8 +132,32 @@ pub fn analyze(
                 read_default_strings,
             )?;
             let directives = formats::read_directives(path, &bytes, bookmarks)?;
-            if read_command_inputs {
-                facts.system_exec_inputs = formats::read_system_exec_inputs(path, &bytes)?;
+            if (read_command_inputs || http_enabled.iter().any(|enabled| *enabled))
+                && let Some(links) = formats::read_call_links(path, &bytes)?
+            {
+                let needs_graph = (read_command_inputs
+                    && crate::rules::sast::system_exec::has_calls(&links))
+                    || crate::rules::sast::http::has_calls(&links, http_enabled);
+                let graph = if needs_graph {
+                    formats::read_diagram_graph(&bytes)?
+                } else {
+                    None
+                };
+                if read_command_inputs {
+                    facts.call_inputs.insert(
+                        "system-exec-command-input",
+                        crate::rules::sast::system_exec::analyze_links(&links, graph.as_ref()),
+                    );
+                }
+                if http_enabled.iter().any(|enabled| *enabled) {
+                    facts
+                        .call_inputs
+                        .extend(crate::rules::sast::http::analyze_links(
+                            &links,
+                            graph.as_ref(),
+                            http_enabled,
+                        ));
+                }
             }
             if read_paths {
                 facts.path_usage = formats::read_path_usage(path, &bytes)?;
@@ -150,15 +180,15 @@ pub fn analyze(
     }
     for (path, mut facts, bookmarks) in analyzed_files {
         for (rule, severity, options) in &active {
-            if rule.id() == "system-exec-command-input"
-                && let Some(inputs) = &facts.system_exec_inputs
-                && let Some((uid, reason)) = inputs.incomplete_calls.first()
+            if let Some(evidence) = facts.call_inputs.get(rule.id())
+                && let Some((uid, reason)) = evidence.incomplete.first()
             {
                 report.errors.push(AnalysisError {
                     path: path.clone(),
                     message: format!(
-                        "system-exec-command-input: incomplete analysis of {} call(s); node {uid}: {reason}",
-                        inputs.incomplete_calls.len()
+                        "{}: incomplete analysis of {} call(s); node {uid}: {reason}",
+                        rule.id(),
+                        evidence.incomplete.len()
                     ),
                 });
             }
@@ -179,10 +209,9 @@ pub fn analyze(
                 .filter_map(|bookmark| bookmark.object)
                 .collect();
             for object in targets {
-                if !matches!(
-                    rule.id(),
-                    "path-usage" | "hardcoded-secret-default" | "system-exec-command-input"
-                ) {
+                if !matches!(rule.id(), "path-usage" | "hardcoded-secret-default")
+                    && !rule.supports_call_suppression()
+                {
                     report.errors.push(AnalysisError {
                         path: path.clone(),
                         message: format!("{}: object-scoped ignore is not supported for this rule; remove the arrow for a file-wide ignore", rule.id()),
@@ -230,13 +259,13 @@ fn suppress_object(facts: &mut formats::FileFacts, rule: &str, object: formats::
             });
             defaults || constants
         }
-        "system-exec-command-input" if object.heap == formats::SourceHeap::Diagram => {
-            let Some(inputs) = facts.system_exec_inputs.as_mut() else {
+        _ if object.heap == formats::SourceHeap::Diagram => {
+            let Some(evidence) = facts.call_inputs.get_mut(rule) else {
                 return false;
             };
-            let count = inputs.influenced_calls.len();
-            inputs.influenced_calls.retain(|uid| *uid != object.uid);
-            inputs.influenced_calls.len() != count
+            let count = evidence.calls.len();
+            evidence.calls.retain(|uid| *uid != object.uid);
+            evidence.calls.len() != count
         }
         _ => false,
     }
@@ -335,10 +364,20 @@ mod tests {
             labels: vec![b"same".to_vec()],
             bytes: b"password=default".to_vec(),
         }]);
-        facts.system_exec_inputs = Some(formats::SystemExecInputs {
-            influenced_calls: vec![10, 20],
-            incomplete_calls: vec![(10, "unsupported transfer".to_owned())],
-        });
+        facts.call_inputs.insert(
+            "system-exec-command-input",
+            formats::CallEvidence {
+                calls: vec![10, 20],
+                incomplete: vec![(10, "unsupported transfer".to_owned())],
+            },
+        );
+        facts.call_inputs.insert(
+            "http-control-url",
+            formats::CallEvidence {
+                calls: vec![10, 20],
+                incomplete: vec![(10, "unsupported transfer".to_owned())],
+            },
+        );
         assert!(suppress_object(
             &mut facts,
             "hardcoded-secret-default",
@@ -347,7 +386,7 @@ mod tests {
         assert_eq!(facts.diagram_string_values.as_ref().unwrap().len(), 1);
         assert_eq!(facts.default_string_values.as_ref().unwrap().len(), 1);
         assert_eq!(
-            facts.system_exec_inputs.as_ref().unwrap().influenced_calls,
+            facts.call_inputs["system-exec-command-input"].calls,
             [10, 20]
         );
         assert!(!suppress_object(
@@ -360,12 +399,13 @@ mod tests {
             "system-exec-command-input",
             diagram
         ));
-        let inputs = facts.system_exec_inputs.as_ref().unwrap();
-        assert_eq!(inputs.influenced_calls, [20]);
-        assert_eq!(
-            inputs.incomplete_calls,
-            [(10, "unsupported transfer".to_owned())]
-        );
+        let inputs = &facts.call_inputs["system-exec-command-input"];
+        assert_eq!(inputs.calls, [20]);
+        assert_eq!(inputs.incomplete, [(10, "unsupported transfer".to_owned())]);
+        assert!(suppress_object(&mut facts, "http-control-url", diagram));
+        assert_eq!(facts.call_inputs["http-control-url"].calls, [20]);
+        assert_eq!(facts.call_inputs["http-control-url"].incomplete.len(), 1);
+        assert_eq!(facts.call_inputs["system-exec-command-input"].calls, [20]);
         assert!(suppress_object(
             &mut facts,
             "hardcoded-secret-default",

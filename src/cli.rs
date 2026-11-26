@@ -56,8 +56,8 @@ enum Command {
     /// Discover LabVIEW files and run enabled security analysis rules.
     #[command(
         visible_alias = "sast",
-        after_long_help = "A '#wirelint-ignore RULE-ID' free-label comment arrow suppresses only the linked string constant/control for hardcoded-secret-default, or the linked System Exec call node for system-exec-command-input. Unlinked diagram directives remain file-wide. Linked front-panel pane labels are supported; unlinked front-panel labels are inert. Invalid links are analysis errors. Ignores never suppress incomplete analysis or other analysis errors.",
-        long_about = "Recursively analyze the same file types as 'lint', using a separate security-focused rule registry. Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults and scalar block-diagram string constants for credentials (credential-named controls and constants, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. The system-exec-command-input rule reviews front-panel control influence on NI System Exec.vi command input through direct wires or Concatenate Strings. Calls alone and constant-only commands are not findings. Unsupported call-link layouts or command paths are analysis errors, even with --fail-on none. Findings mean 'needs review', not 'confirmed exploitable'. Use --format gitlab-sast to write a GitLab Security Report Schema report for artifacts:reports:sast. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
+        after_long_help = "A '#wirelint-ignore RULE-ID' free-label comment arrow suppresses only the linked string constant/control for hardcoded-secret-default, or the linked call node for System Exec and HTTP call rules. Unlinked diagram directives remain file-wide. Linked front-panel pane labels are supported; unlinked front-panel labels are inert. Invalid links are analysis errors. Ignores never suppress incomplete analysis or other analysis errors.",
+        long_about = "Recursively analyze the same file types as 'lint', using a separate security-focused rule registry. Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults and scalar block-diagram string constants for credentials (credential-named controls and constants, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. The system-exec-command-input rule reviews front-panel control influence on NI System Exec.vi command input through direct wires or Concatenate Strings. Calls alone and constant-only commands are not findings. HTTP rules review control-influenced request URLs, URLs without a proven HTTPS scheme, and disabled server verification. Unsupported call-link layouts or input paths are analysis errors, even with --fail-on none. Findings mean 'needs review', not 'confirmed exploitable'. Use --format gitlab-sast to write a GitLab Security Report Schema report for artifacts:reports:sast. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
     )]
     Security {
         /// Folder to scan.
@@ -486,6 +486,23 @@ mod tests {
                 .is_ok(),
                 "{format}"
             );
+        }
+    }
+
+    #[test]
+    fn security_help_describes_http_analysis() {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("security")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        for expected in [
+            "control-influenced request URLs",
+            "URLs without a proven HTTPS scheme",
+            "disabled server verification",
+        ] {
+            assert!(help.contains(expected), "{help}");
         }
     }
 

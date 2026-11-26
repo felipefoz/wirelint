@@ -269,11 +269,10 @@ pub(super) fn read_diagram_graph(
     Ok(graph)
 }
 
-/// Resolves static call identities before paying to construct a source graph.
-///
-/// Only modern IUVI links are supported. Unknown link records are errors because
-/// records are not length-framed and cannot be skipped reliably.
-pub(super) fn read_system_exec_inputs(bytes: &[u8]) -> io::Result<Option<super::SystemExecInputs>> {
+/// Reads static call links; `None` indicates a non-VI resource.
+pub(super) fn read_call_links(
+    bytes: &[u8],
+) -> io::Result<Option<Vec<super::call_links::CallLink>>> {
     let resources = resources(bytes)?;
     if !resources.is_vi {
         return Ok(None);
@@ -300,48 +299,35 @@ pub(super) fn read_system_exec_inputs(bytes: &[u8]) -> io::Result<Option<super::
         }
     }
     let Some(links) = links else {
-        return Ok(Some(super::SystemExecInputs::default()));
+        return Ok(Some(Vec::new()));
     };
     if version.is_none_or(|version| version.major < 14) {
         return Err(invalid(
-            "LIbd command analysis requires saved LabVIEW 14.0 or newer",
+            "LIbd call analysis requires saved LabVIEW 14.0 or newer",
         ));
     }
     let links = super::call_links::parse(links)
         .map_err(|error| invalid(format!("LIbd call links: {error}")))?;
-    let mut calls = std::collections::BTreeMap::new();
-    for link in links {
-        let is_system_exec = super::command_input::is_system_exec(&link);
-        for uid in link.nodes {
-            if calls.insert(uid, is_system_exec).is_some() {
+    let mut nodes = std::collections::BTreeSet::new();
+    for link in &links {
+        for &uid in &link.nodes {
+            if !nodes.insert(uid) {
                 return Err(invalid("duplicate call-node identity in LIbd"));
             }
         }
     }
-    let calls = calls
-        .into_iter()
-        .filter_map(|(uid, matches)| matches.then_some(uid))
-        .collect::<Vec<_>>();
-    if calls.is_empty() {
-        return Ok(Some(super::SystemExecInputs::default()));
-    }
-    let graph = super::read_diagram_graph(bytes)?;
-    Ok(Some(super::command_input::analyze(graph.as_ref(), &calls)))
+    Ok(Some(links))
 }
 
 /// Reads one section-zero payload without accepting a table overlap or alias.
 fn single_payload<'a>(resources: &Resources<'a>, block: &[u8]) -> io::Result<&'a [u8]> {
     let offset = number(block, 8)?;
     if number(block, 4)? != 0 || offset < resources.table_size {
-        return Err(invalid(
-            "unsupported command-analysis resource section table",
-        ));
+        return Err(invalid("unsupported call-analysis resource section table"));
     }
     let section = slice(resources.table, offset, 20)?;
     if number(section, 0)? != 0 {
-        return Err(invalid(
-            "unsupported command-analysis resource section index",
-        ));
+        return Err(invalid("unsupported call-analysis resource section index"));
     }
     let record_offset = number(section, 12)?;
     let record = slice(
@@ -572,7 +558,7 @@ pub(super) fn read_facts_with_orphaned_vi(
     Ok((
         FileFacts {
             path_usage: None,
-            system_exec_inputs: None,
+            call_inputs: Default::default(),
             separate_compiled_code,
             has_description,
             saved_version,

@@ -396,7 +396,7 @@ mod tests {
         assert!(
             rule.check(
                 &FileFacts {
-                    system_exec_inputs: None,
+                    call_inputs: Default::default(),
                     separate_compiled_code: false,
                     has_description: None,
                     saved_version: None,
@@ -421,7 +421,7 @@ mod tests {
         assert!(
             rule.check(
                 &FileFacts {
-                    system_exec_inputs: None,
+                    call_inputs: Default::default(),
                     separate_compiled_code: true,
                     has_description: None,
                     saved_version: None,
@@ -479,7 +479,7 @@ mod tests {
             ),
         ] {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description: None,
                 saved_version: Some(version),
@@ -583,7 +583,7 @@ mod tests {
             (Some(version(21, 0)), None, version(21, 0), None),
         ] {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description: None,
                 saved_version: Some(saved),
@@ -624,7 +624,7 @@ mod tests {
         let rule = &FileDescription;
         for (has_description, violation) in [(Some(false), true), (Some(true), false)] {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description,
                 saved_version: None,
@@ -650,7 +650,7 @@ mod tests {
     fn debugging_policy_supports_both_states_and_skips_non_vi_files() {
         for debugging_enabled in [None, Some(false), Some(true)] {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description: None,
                 saved_version: None,
@@ -705,7 +705,7 @@ mod tests {
         for (has_breakpoints, expected) in [(None, false), (Some(false), false), (Some(true), true)]
         {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description: None,
                 saved_version: None,
@@ -732,7 +732,7 @@ mod tests {
         assert_eq!(PasswordSet.default_severity(), Severity::Warning);
         for (has_password, expected) in [(None, false), (Some(false), false), (Some(true), true)] {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description: None,
                 saved_version: None,
@@ -761,7 +761,7 @@ mod tests {
             [(None, false), (Some(false), false), (Some(true), true)]
         {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description: None,
                 saved_version: None,
@@ -788,7 +788,7 @@ mod tests {
         assert_eq!(OrphanedVi.default_severity(), Severity::Error);
         for (orphaned_vi, expected) in [(None, false), (Some(false), false), (Some(true), true)] {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description: None,
                 saved_version: None,
@@ -817,7 +817,7 @@ mod tests {
             [(None, false), (Some(true), true), (Some(false), false)]
         {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description: None,
                 saved_version: None,
@@ -851,7 +851,7 @@ mod tests {
             (Some(vec![false, true]), true),
         ] {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description: None,
                 saved_version: None,
@@ -882,7 +882,7 @@ mod tests {
             (TerminalDisplayStyle::DataType, vec![true, false], true),
         ] {
             let facts = FileFacts {
-                system_exec_inputs: None,
+                call_inputs: Default::default(),
                 separate_compiled_code: true,
                 has_description: None,
                 saved_version: None,
@@ -920,7 +920,7 @@ mod tests {
 
     fn facts_with_connector_pane_pattern(connector_pane_pattern: Option<u8>) -> FileFacts {
         FileFacts {
-            system_exec_inputs: None,
+            call_inputs: Default::default(),
             separate_compiled_code: true,
             has_description: None,
             saved_version: None,

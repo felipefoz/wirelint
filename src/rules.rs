@@ -35,6 +35,11 @@ pub trait Rule: Sync {
     fn description(&self) -> &'static str;
     fn default_severity(&self) -> Severity;
 
+    /// Whether a diagram ignore arrow can suppress one call-node finding.
+    fn supports_call_suppression(&self) -> bool {
+        false
+    }
+
     /// Returns a finding message when the facts violate this rule.
     fn check(&self, facts: &FileFacts, options: Option<&RuleConfig>) -> Option<String>;
 

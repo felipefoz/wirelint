@@ -69,3 +69,16 @@ analysis, and the callers were never executed during fixture creation.
 These callers use NI's `<vilib>/Platform/system.llb/System Exec.vi`. The
 saved command slot is 11, while standard input is 10. Tests inspect these
 files without needing the NI library or launching LabVIEW.
+
+The HTTP fixtures under `sast/http-control-url`, `sast/http-plaintext-url`,
+and `sast/http-server-verification` are original LabVIEW 2024 callers. Their
+HTTP calls are inside a case selected by a constant false guard. Fixture
+creation verified that guard before running the VIs; the HTTP calls did not
+execute. Scanning is static and requires neither LabVIEW nor network access.
+
+- GET and PUT control URLs, including concatenation, need destination and
+  scheme review.
+- Literal GET and POST `http://` URLs are reported; the literal `https://`
+  URL is not.
+- `OpenHandle` and `ConfigSSL` verification inputs wired false are reported;
+  true and the unwired `OpenHandle` default are not.

@@ -751,7 +751,7 @@ mod tests {
 
     fn facts(values: Vec<DefaultStringValue>) -> FileFacts {
         FileFacts {
-            system_exec_inputs: None,
+            call_inputs: Default::default(),
             separate_compiled_code: false,
             has_description: None,
             saved_version: None,

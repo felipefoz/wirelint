@@ -18,6 +18,7 @@ const PRIM_RES_ID: i32 = 203;
 const SIGNAL_LIST: i32 = 233;
 const STATE: i32 = 246;
 const TERM_LIST: i32 = 268;
+const CONST_VALUE: i32 = 589;
 const MAX_OBJECTS: usize = 100_000;
 const MAX_ENDPOINTS: usize = 100_000;
 const MAX_DEPTH: usize = 256;
@@ -40,6 +41,11 @@ pub struct GraphObject {
     pub primitive_id: Option<i32>,
     pub call_slot: Option<i32>,
     pub primitive_slot: Option<i32>,
+    /// Flattened source value for a diagram constant, if present.
+    pub constant_value: Option<Vec<u8>>,
+    /// Direct display-object class for a constant; duplicate fields are ambiguous.
+    pub constant_display: Option<i32>,
+    pub ambiguous_constant_display: bool,
 }
 
 /// A saved signal is a net with any number of endpoints, not a pairwise edge.
@@ -128,6 +134,9 @@ pub(super) fn parse(bytes: &[u8]) -> io::Result<DiagramGraph> {
                     primitive_id: None,
                     call_slot: None,
                     primitive_slot: None,
+                    constant_value: None,
+                    constant_display: None,
+                    ambiguous_constant_display: false,
                 };
                 if graph.objects.insert(uid, object).is_some() {
                     return Err(invalid("duplicate diagram graph object UID"));
@@ -152,6 +161,16 @@ pub(super) fn parse(bytes: &[u8]) -> io::Result<DiagramGraph> {
             && let Some(uid) = parent.uid
             && let Some(object) = graph.objects.get_mut(&uid)
         {
+            if parent.class == Some(super::BD_CONST_DCO)
+                && node.tag == super::DDO
+                && matches!(scope, Scope::Open | Scope::Leaf)
+            {
+                if object.constant_display.is_some() {
+                    object.ambiguous_constant_display = true;
+                } else {
+                    object.constant_display = Some(node.class.unwrap_or(-1));
+                }
+            }
             if node.tag == DCO {
                 set_once(
                     &mut object.dco,
@@ -160,6 +179,9 @@ pub(super) fn parse(bytes: &[u8]) -> io::Result<DiagramGraph> {
                 )?;
             }
             if scope == Scope::Leaf {
+                if parent.class == Some(super::BD_CONST_DCO) && node.tag == CONST_VALUE {
+                    set_once(&mut object.constant_value, content.to_vec())?;
+                }
                 if node.tag == OBJ_FLAGS {
                     set_once(&mut object.flags, object_flags(content)?)?;
                 }

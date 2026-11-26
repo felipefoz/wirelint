@@ -2148,6 +2148,88 @@ fn sast_reports_control_defaults_in_separated_and_embedded_vis() {
 }
 
 #[test]
+fn security_reviews_http_inputs_without_exposing_urls() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sast");
+    for (folder, expected, clean) in [
+        (
+            "http-control-url",
+            vec![
+                ("GET Control.vi", "http-control-url"),
+                ("GET Concatenated Control.vi", "http-control-url"),
+                ("PUT Control.vi", "http-control-url"),
+            ],
+            vec![],
+        ),
+        (
+            "http-plaintext-url",
+            vec![
+                ("GET HTTP Literal.vi", "http-plaintext-url"),
+                ("POST HTTP Literal.vi", "http-plaintext-url"),
+            ],
+            vec!["GET HTTPS Literal.vi"],
+        ),
+        (
+            "http-server-verification",
+            vec![
+                ("OpenHandle Verify False.vi", "http-server-verification"),
+                ("ConfigSSL Verify False.vi", "http-server-verification"),
+            ],
+            vec![
+                "OpenHandle Verify True.vi",
+                "OpenHandle Verify Unwired.vi",
+                "ConfigSSL Verify True.vi",
+            ],
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+            .arg("security")
+            .arg(root.join(folder))
+            .args(["--verbose", "--fail-on", "none"])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for (file, rule) in expected {
+            assert!(
+                stdout.contains(&format!("{file}: warning [{rule}]")),
+                "{stdout}"
+            );
+        }
+        for file in clean {
+            assert!(!stdout.contains(&format!("{file}:")), "{stdout}");
+        }
+        assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+        assert!(!stdout.contains("example.invalid"), "{stdout}");
+    }
+
+    let directory = TestDirectory::new();
+    let config = directory.write(
+        "security.yaml",
+        "security:\n  rules:\n    http-control-url:\n      enabled: false\n    http-plaintext-url:\n      enabled: false\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("security")
+        .arg(root.join("http-control-url"))
+        .arg("--config")
+        .arg(config)
+        .arg("--verbose")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(output.status.success(), "{stdout}");
+    assert!(!stdout.contains("warning [http-"), "{stdout}");
+    assert!(stdout.contains("0 analysis error(s)"), "{stdout}");
+}
+
+#[test]
 fn sast_reviews_only_control_influenced_system_exec_commands() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -2257,7 +2339,7 @@ fn sast_reviews_only_control_influenced_system_exec_commands() {
 }
 
 #[test]
-fn sast_reports_unsupported_call_links_as_errors_unless_the_rule_is_disabled() {
+fn sast_reports_unsupported_call_links_until_all_call_rules_are_disabled() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
@@ -2332,7 +2414,20 @@ fn sast_reports_unsupported_call_links_as_errors_unless_the_rule_is_disabled() {
         .arg("security")
         .arg(&directory.0)
         .arg("--config")
-        .arg(config)
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    fs::write(
+        &config,
+        "rules:\n  system-exec-command-input:\n    enabled: false\n  http-control-url:\n    enabled: false\n  http-plaintext-url:\n    enabled: false\n  http-server-verification:\n    enabled: false\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("security")
+        .arg(&directory.0)
+        .arg("--config")
+        .arg(&config)
         .output()
         .unwrap();
     assert!(

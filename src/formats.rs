@@ -1,16 +1,19 @@
 //! Shared facts and dispatch for native VI/RSRC and XML LabVIEW formats.
 
 mod call_links;
-mod command_input;
 mod connector;
+pub(crate) mod dataflow;
 mod heap;
 mod path_usage;
 mod rsrc;
 mod typed_data;
 mod xml;
 
-pub use command_input::SystemExecInputs;
+pub(crate) use call_links::CallLink;
 pub use heap::DiagramStringConstant;
+pub(crate) use heap::graph::DiagramGraph;
+#[cfg(test)]
+pub(crate) use heap::graph::{GraphIssue, GraphObject};
 pub use heap::suppression::{Directive, ObjectId, SourceHeap};
 pub use path_usage::{PathKind, PathUsage};
 pub use typed_data::DefaultStringValue;
@@ -53,20 +56,27 @@ pub fn read_diagram_graph(bytes: &[u8]) -> io::Result<Option<heap::graph::Diagra
     rsrc::read_diagram_graph(bytes)
 }
 
-/// Extracts local command-input evidence only for VI-family binary resources.
-///
-/// Unsupported link layouts and malformed resources are analysis errors.
-/// XML documents and controls do not have an executable caller diagram.
-pub fn read_system_exec_inputs(path: &Path, bytes: &[u8]) -> io::Result<Option<SystemExecInputs>> {
-    let extension = path.extension().and_then(|extension| extension.to_str());
-    if !extension.is_some_and(|extension| {
-        ["vi", "vit", "vim"]
-            .iter()
-            .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-    }) {
+/// Reads static call identities for VI-family resources.
+pub(crate) fn read_call_links(path: &Path, bytes: &[u8]) -> io::Result<Option<Vec<CallLink>>> {
+    if !path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["vi", "vit", "vim"]
+                .iter()
+                .any(|kind| extension.eq_ignore_ascii_case(kind))
+        })
+    {
         return Ok(None);
     }
-    rsrc::read_system_exec_inputs(bytes)
+    rsrc::read_call_links(bytes)
+}
+
+/// Generic per-rule call evidence and unresolved input paths.
+#[derive(Debug, Default)]
+pub struct CallEvidence {
+    pub calls: Vec<i32>,
+    pub incomplete: Vec<(i32, String)>,
 }
 
 /// LabVIEW major and minor release numbers, ordered numerically.
@@ -118,8 +128,8 @@ impl std::fmt::Display for Version {
 pub struct FileFacts {
     /// Path constants and scalar control defaults, when requested.
     pub path_usage: Option<Vec<PathUsage>>,
-    /// Local command-input evidence, only extracted for the System Exec rule.
-    pub system_exec_inputs: Option<SystemExecInputs>,
+    /// Evidence for enabled call-oriented rules, keyed by rule ID.
+    pub call_inputs: std::collections::BTreeMap<&'static str, CallEvidence>,
     pub separate_compiled_code: bool,
     pub has_description: Option<bool>,
     pub saved_version: Option<Version>,
@@ -305,9 +315,11 @@ mod tests {
             .join("system-exec-command-input")
             .join("linked-ignore.vi");
         let bytes = std::fs::read(&path).unwrap();
-        let inputs = read_system_exec_inputs(&path, &bytes).unwrap().unwrap();
-        assert_eq!(inputs.influenced_calls, [9200, 9300]);
-        assert!(inputs.incomplete_calls.is_empty());
+        let links = read_call_links(&path, &bytes).unwrap().unwrap();
+        let graph = read_diagram_graph(&bytes).unwrap();
+        let inputs = crate::rules::sast::system_exec::analyze_links(&links, graph.as_ref());
+        assert_eq!(inputs.calls, [9200, 9300]);
+        assert!(inputs.incomplete.is_empty());
         let directives = read_directives(&path, &bytes, Vec::new()).unwrap();
         assert!(directives.iter().any(|directive| directive.object
             == Some(ObjectId {
