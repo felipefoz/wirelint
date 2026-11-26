@@ -11,18 +11,16 @@ WireLint supports Windows and Linux. Changes should be checked on both platforms
 
 Use GitHub Actions on pushes and pull requests. Run formatting checks, tests, and Clippy on standard GitHub-hosted Linux and Windows runners.
 
-Run CodeQL for Rust and audit the lockfile against RustSec advisories in a
-separate security workflow on pushes to `main`, pull requests, daily at 04:32
-UTC, and on manual request. Use a manual Cargo build for CodeQL and
-`cargo-audit` directly rather than automatically opening issues for advisories.
+Configure security scanning through GitHub repository settings instead of a
+dedicated security workflow. This replaces the previously configured CodeQL and
+`cargo-audit` workflow.
 
 ## Consequences
 
 - Keep the workflow checks aligned with the commands in `CONTRIBUTING.md`.
 - Maintain coverage for both supported operating systems.
-- Security scans run on Linux and require GitHub code scanning to be enabled.
-- Manual runs are available from the GitHub Actions Security workflow after it
-  exists on the default branch. Scheduled runs also use the default branch.
+- Security scanning depends on the features enabled in GitHub settings; the
+  removed workflow's schedule, manual trigger, and dependency audit no longer run.
 - Keep tests self-contained in clean checkouts. Generate synthetic binary
   fixtures from tracked Rust test helpers instead of relying on ignored
   sandbox files, which are absent from CI.

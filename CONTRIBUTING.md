@@ -38,10 +38,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 Add focused tests for new features and bug fixes.
 
-The Security workflow runs CodeQL and `cargo-audit` on pull requests, pushes to
-`main`, and daily at 04:32 UTC. It can also be started from GitHub Actions using
-**Run workflow** once the workflow is on the default branch. Report
-vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 Tests must run from a clean checkout without LabVIEW or ignored sandbox files.
 Construct binary fixtures synthetically; shared fixture builders belong in
