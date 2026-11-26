@@ -6,9 +6,9 @@ stored facts from LabVIEW files. The System Exec rule follows a limited set
 of local block-diagram connections.
 Findings are review signals, not confirmation of exploitability.
 
-All SAST rules are enabled by default and use the shared `enabled` and
-`severity` options. Use the separate
-[SAST configuration template](../wirelint-sast.example.yaml), and see the
+All security rules are enabled by default and use the shared `enabled` and
+`severity` options. Configure them under `security.rules` in the
+[configuration template](../wirelint.example.yaml), and see the
 [configuration guide](configuration.md) for schema and exit-threshold details.
 
 ## Rules

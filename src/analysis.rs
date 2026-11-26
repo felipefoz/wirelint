@@ -1,6 +1,6 @@
 //! Rule execution and findings, separate from discovery and presentation.
 
-use crate::config::{Config, FailOn};
+use crate::config::{Config, FailOn, RuleCategory};
 use crate::formats;
 use crate::rules::{Rule, Severity};
 use std::collections::{HashMap, HashSet};
@@ -62,11 +62,18 @@ impl Report {
 /// File errors are recorded and scanning continues. When all rules are disabled,
 /// discovered files are not read and the analyzed count is zero. `rules` is
 /// the active registry for the selected command.
-pub fn analyze(root: &Path, files: &[PathBuf], config: &Config, rules: &[&dyn Rule]) -> Report {
+pub fn analyze(
+    root: &Path,
+    files: &[PathBuf],
+    config: &Config,
+    category: RuleCategory,
+    rules: &[&dyn Rule],
+) -> Report {
+    let rule_options = config.rules(category);
     let active: Vec<_> = rules
         .iter()
         .filter_map(|rule| {
-            let options = config.rules.get(rule.id());
+            let options = rule_options.get(rule.id());
             if options.is_some_and(|options| !options.enabled) {
                 None
             } else {

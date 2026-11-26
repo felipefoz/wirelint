@@ -1,7 +1,7 @@
 //! Command-line parsing, terminal summaries, and optional CI report files.
 
 use crate::analysis;
-use crate::config::{Config, FailOn};
+use crate::config::{Config, FailOn, RuleCategory};
 use crate::reports::{self, Format};
 use crate::rules::quality::BUILT_INS as QUALITY_BUILT_INS;
 use crate::rules::sast::BUILT_INS as SAST_BUILT_INS;
@@ -19,7 +19,7 @@ use std::time::{Duration, Instant, SystemTime};
     name = "wirelint",
     version,
     about = "Static analysis for LabVIEW",
-    long_about = "Recursively discover LabVIEW files and run enabled built-in analysis rules. Use 'wirelint rules' to list rules. Files are read without launching LabVIEW or modifying source files."
+    long_about = "Analyze LabVIEW files and report quality or security findings."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -28,7 +28,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Run quality rules, including scalar path usage checks.
+    /// Run built-in quality analysis rules.
     #[command(
         after_long_help = "The path-usage rule reports empty ordinary scalar path constants, absolute scalar paths, and invalid path syntax. Its targets option accepts windows and/or linux (default: both). Attach a '#wirelint-ignore path-usage' free-label comment arrow to a constant or front-panel control/terminal to ignore only that object's values. Linked front-panel pane labels are supported; unlinked front-panel labels are inert. Invalid links and linked directives for VI-wide rules are analysis errors. Ignores never suppress analysis errors.",
         long_about = "Recursively analyze .vi, .vit, .vim, .ctl, .lvproj, .lvclass, and .lvlib files (case-insensitive). Skip .llb archives and symbolic links below the root. An unlinked '#wirelint-ignore RULE-ID' directive in a VI block-diagram free label or on a standalone line in an XML file's own description skips that enabled rule's findings for that file and is reported on stdout. Directive lines alone do not satisfy file-description. All built-in rules are enabled by default, including saved-version with a minimum saved LabVIEW version of 20.0 and no maximum. The class-mutation-history rule warns when an .lvclass contains mutation-history content in its NI.LVClass.Geneology XML property. The orphaned-vi rule resolves owner paths relative to the VI file and library member URLs relative to the library file. Library VI items without a URL attribute are skipped. The connector-pane-pattern rule skips global and polymorphic VIs without a connector pane. The auto-error-handling rule skips global and polymorphic VIs because they have no executable diagram of their own. Configure inclusive minimum-version and/or maximum-version bounds in YAML; a maximum-only configuration has no minimum. The debugging-status rule flags VIs with debugging enabled by default; set fail-when: disabled in YAML to reverse the check. The no-breakpoints rule reports VIs saved with block diagram breakpoints as errors by default. Print the scan type on stdout. Show summary totals and elapsed scan time by default; use --verbose for individual findings, without listing every discovered path. Elapsed time covers discovery and analysis, excluding configuration loading and final report rendering. Analysis errors always include file details. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error. Unsupported binary formats are errors, never passing checks."
@@ -57,7 +57,7 @@ enum Command {
     #[command(
         visible_alias = "sast",
         after_long_help = "A '#wirelint-ignore RULE-ID' free-label comment arrow suppresses only the linked string constant/control for hardcoded-secret-default, or the linked System Exec call node for system-exec-command-input. Unlinked diagram directives remain file-wide. Linked front-panel pane labels are supported; unlinked front-panel labels are inert. Invalid links are analysis errors. Ignores never suppress incomplete analysis or other analysis errors.",
-        long_about = "Recursively analyze the same file types as 'lint', using a separate security-focused rule registry (see 'wirelint rules'). Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults and scalar block-diagram string constants for credentials (credential-named controls and constants, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. The system-exec-command-input rule reviews front-panel control influence on NI System Exec.vi command input through direct wires or Concatenate Strings. Calls alone and constant-only commands are not findings. Unsupported call-link layouts or command paths are analysis errors, even with --fail-on none. Findings mean 'needs review', not 'confirmed exploitable'. Use --format gitlab-sast to write a GitLab Security Report Schema report for artifacts:reports:sast. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
+        long_about = "Recursively analyze the same file types as 'lint', using a separate security-focused rule registry. Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults and scalar block-diagram string constants for credentials (credential-named controls and constants, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. The system-exec-command-input rule reviews front-panel control influence on NI System Exec.vi command input through direct wires or Concatenate Strings. Calls alone and constant-only commands are not findings. Unsupported call-link layouts or command paths are analysis errors, even with --fail-on none. Findings mean 'needs review', not 'confirmed exploitable'. Use --format gitlab-sast to write a GitLab Security Report Schema report for artifacts:reports:sast. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
     )]
     Security {
         /// Folder to scan.
@@ -79,8 +79,6 @@ enum Command {
         #[arg(long, value_name = "FILE", requires = "format")]
         output: Option<PathBuf>,
     },
-    /// List built-in rule IDs, descriptions, and default severities.
-    Rules,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -104,26 +102,6 @@ impl From<ScanFormat> for Format {
 /// Executes the command and returns the process status, propagating I/O errors.
 pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Result<u8> {
     match cli.command {
-        Command::Rules => {
-            for (registry, rules) in [("lint", QUALITY_BUILT_INS), ("security", SAST_BUILT_INS)] {
-                for rule in rules {
-                    let cwe = rule.cwe();
-                    writeln!(
-                        output,
-                        "{} [{registry}, {}]{}: {}",
-                        rule.id(),
-                        rule.default_severity(),
-                        if cwe.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" ({})", cwe.join(", "))
-                        },
-                        rule.description()
-                    )?;
-                }
-            }
-            Ok(0)
-        }
         Command::Lint {
             folder,
             config,
@@ -139,6 +117,7 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             format.map(Format::from),
             destination,
             "lint (quality)",
+            RuleCategory::Lint,
             QUALITY_BUILT_INS,
             output,
             errors,
@@ -158,6 +137,7 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             format,
             destination,
             "security (security)",
+            RuleCategory::Security,
             SAST_BUILT_INS,
             output,
             errors,
@@ -176,13 +156,14 @@ fn run_rules(
     format: Option<Format>,
     destination: Option<PathBuf>,
     scan_type: &str,
+    category: RuleCategory,
     rules: &[&dyn Rule],
     output: &mut impl Write,
     errors: &mut impl Write,
 ) -> io::Result<u8> {
     let config = config_path
         .as_deref()
-        .map(|path| Config::load_for(path, rules))
+        .map(|path| Config::load_for(path, category))
         .transpose()?
         .unwrap_or_default();
     let fail_on = fail_on.unwrap_or(config.fail_on);
@@ -200,7 +181,7 @@ fn run_rules(
     }
     writeln!(output, "Scan type: {scan_type}")?;
     output.flush()?;
-    let report = analysis::analyze(&folder, &files, &config, rules);
+    let report = analysis::analyze(&folder, &files, &config, category, rules);
     let wall_clock_finished = SystemTime::now();
     let elapsed = started.elapsed();
     if verbose {
@@ -397,6 +378,30 @@ mod tests {
     }
 
     #[test]
+    fn root_help_is_brief_and_does_not_expose_a_rules_command() {
+        let mut command = Cli::command();
+        let help = command.render_long_help().to_string();
+        assert!(
+            help.contains("Analyze LabVIEW files and report quality or security findings."),
+            "{help}"
+        );
+        assert!(
+            !help
+                .lines()
+                .any(|line| line.trim_start().starts_with("rules ")),
+            "{help}"
+        );
+        let lint_about = command
+            .find_subcommand_mut("lint")
+            .unwrap()
+            .get_about()
+            .unwrap()
+            .to_string();
+        assert_eq!(lint_about, "Run built-in quality analysis rules");
+        assert!(Cli::try_parse_from(["wirelint", "rules"]).is_err());
+    }
+
+    #[test]
     fn accepts_canonical_and_legacy_gitlab_code_quality_names() {
         for format in ["gitlab-code-quality", "gitlab"] {
             assert!(
@@ -416,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn help_describes_rules_and_exit_behavior() {
+    fn lint_help_describes_analysis_and_exit_behavior() {
         let mut command = Cli::command();
         let help = command
             .find_subcommand_mut("lint")

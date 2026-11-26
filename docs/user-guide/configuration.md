@@ -21,18 +21,18 @@ or use it directly for `lint` from the repository root:
 wirelint lint path/to/project --config docs/wirelint.example.yaml
 ```
 
-`security` has a separate registry and template,
-[`wirelint-sast.example.yaml`](../wirelint-sast.example.yaml):
+The same file configures both command-specific registries. `lint.rules` and
+`security.rules` keep their options separate:
 
 ```text
-wirelint security path/to/project --config docs/wirelint-sast.example.yaml
+wirelint security path/to/project --config docs/wirelint.example.yaml
 ```
 
-Each template lists every rule in its command's registry with its default
-options. Rust tests check that both templates remain complete and match the
-defaults. Adjust `enabled` and `severity` in your copy to select the checks and
-levels for your project. Both templates exclude folders named `.git` and
-`.lv-venv` at any depth.
+The [configuration template](../wirelint.example.yaml) lists every rule in both
+registries with its default options. Rust tests check that it stays complete
+and matches those defaults. Adjust `enabled` and `severity` in your copy to
+select the checks and levels for your project. It excludes folders named
+`.git` and `.lv-venv` at any depth.
 
 ## Schema
 
@@ -42,21 +42,27 @@ fail-on: error
 exclude-folders:
   - .git
   - .lv-venv
-rules:
-  separate-compiled-code:
-    enabled: true
-    severity: warning
-  saved-version:
-    enabled: true
-    severity: warning
-    minimum-version: '20.0'
-  debugging-status:
-    enabled: true
-    severity: warning
-    fail-when: enabled
-  no-breakpoints:
-    enabled: true
-    severity: error
+lint:
+  rules:
+    separate-compiled-code:
+      enabled: true
+      severity: warning
+    saved-version:
+      enabled: true
+      severity: warning
+      minimum-version: '20.0'
+    debugging-status:
+      enabled: true
+      severity: warning
+      fail-when: enabled
+    no-breakpoints:
+      enabled: true
+      severity: error
+security:
+  rules:
+    hardcoded-secret-default:
+      enabled: true
+      severity: warning
 ```
 
 | Key | Accepted values | Default |
@@ -64,24 +70,31 @@ rules:
 | `version` | `1` | `1` |
 | `fail-on` | `error`, `warning`, `none` | `error` |
 | `exclude-folders` | List of literal folder names | `[]` (no exclusions) |
-| `rules` | Mapping of built-in rule IDs to option mappings | No overrides |
-| `rules.<id>.enabled` | YAML Boolean | `true` |
-| `rules.<id>.severity` | `info`, `warning`, `error` | Rule default |
-| `rules.saved-version.minimum-version` | Quoted `major.minor` string | `'20.0'` if neither bound is set; otherwise no implicit minimum |
-| `rules.saved-version.maximum-version` | Quoted `major.minor` string | No maximum |
-| `rules.debugging-status.fail-when` | `enabled`, `disabled` | `enabled` |
-| `rules.connector-pane-pattern.allowed-patterns` | Nonempty list of pattern names (see [quality rules](quality-rules.md#connector-pane-pattern)) | Required; no default, rule is inert until set |
-| `rules.no-breakpoints` | Common `enabled` and `severity` options only | Enabled, `error` |
+| `lint.rules` | Mapping of lint rule IDs to option mappings | No overrides |
+| `security.rules` | Mapping of security rule IDs to option mappings | No overrides |
+| `<category>.rules.<id>.enabled` | YAML Boolean | `true` |
+| `<category>.rules.<id>.severity` | `info`, `warning`, `error` | Rule default |
+| `lint.rules.saved-version.minimum-version` | Quoted `major.minor` string | `'20.0'` if neither bound is set; otherwise no implicit minimum |
+| `lint.rules.saved-version.maximum-version` | Quoted `major.minor` string | No maximum |
+| `lint.rules.debugging-status.fail-when` | `enabled`, `disabled` | `enabled` |
+| `lint.rules.connector-pane-pattern.allowed-patterns` | Nonempty list of pattern names (see [quality rules](quality-rules.md#connector-pane-pattern)) | Required; no default, rule is inert until set |
+| `lint.rules.no-breakpoints` | Common `enabled` and `severity` options only | Enabled, `error` |
 
-Fields may be omitted. An omitted rule remains enabled; `rules: {}` does not
-disable built-ins. An empty options mapping also retains defaults. Use `{}`
-for a configuration with no overrides.
+Fields may be omitted. An omitted rule remains enabled; an empty category rule
+map does not disable built-ins. An empty options mapping also retains defaults.
+Use `{}` for a configuration with no overrides.
 
 Unknown rule IDs, unknown options, duplicate keys, unsupported schema versions,
 invalid YAML, and invalid option values are errors. WireLint reports the
 configuration path and exits with status 2 before scanning. This version
 supports a single YAML document; custom scripts are not supported. Rule-specific
-options are accepted only for the rule that defines them.
+options are accepted only for the rule that defines them. Rule IDs are checked
+against their section's registry, so a lint rule under `security.rules` or a
+security rule under `lint.rules` is a configuration error. The organization
+uses schema version 1; the split does not require a version change. Existing
+configurations with top-level `rules` remain accepted as legacy, single-command
+files and cannot combine that key with non-empty `lint.rules` or
+`security.rules` maps.
 
 The `saved-version` bounds are inclusive. Set only `maximum-version` for an
 upper-bound-only check, or set both bounds to the same value to require an
@@ -122,17 +135,19 @@ and exclusion-list files are not implemented yet.
 To disable the first rule:
 
 ```yaml
-rules:
-  separate-compiled-code:
-    enabled: false
+lint:
+  rules:
+    separate-compiled-code:
+      enabled: false
 ```
 
 To make a violation an error:
 
 ```yaml
-rules:
-  separate-compiled-code:
-    severity: error
+lint:
+  rules:
+    separate-compiled-code:
+      severity: error
 ```
 
 Severity controls the finding's reported level. `fail-on` independently
@@ -147,11 +162,12 @@ For `debugging-status`, `enabled` controls whether the rule runs, while
 example, require debugging to be enabled and make violations fail CI:
 
 ```yaml
-rules:
-  debugging-status:
-    enabled: true
-    severity: error
-    fail-when: disabled
+lint:
+  rules:
+    debugging-status:
+      enabled: true
+      severity: error
+      fail-when: disabled
 ```
 
 By default, the rule reports debugging-enabled VIs at `warning` severity.

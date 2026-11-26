@@ -1,8 +1,8 @@
 //! Strict, explicit YAML configuration for built-in rules.
 
 use crate::formats::Version;
-#[cfg(test)]
-use crate::rules::quality::BUILT_INS;
+use crate::rules::quality::BUILT_INS as QUALITY_BUILT_INS;
+use crate::rules::sast::BUILT_INS as SECURITY_BUILT_INS;
 use crate::rules::{Rule, Severity};
 use clap::ValueEnum;
 use serde::Deserialize;
@@ -146,6 +146,21 @@ fn enabled() -> bool {
     true
 }
 
+/// Selects which rule section supplies overrides for a command.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuleCategory {
+    Lint,
+    Security,
+}
+
+/// Rule overrides for one command.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuleSection {
+    #[serde(default, deserialize_with = "unique_rules")]
+    rules: BTreeMap<String, RuleConfig>,
+}
+
 /// Versioned configuration with all built-ins enabled unless overridden.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
@@ -156,8 +171,12 @@ pub struct Config {
     pub fail_on: FailOn,
     #[serde(default, deserialize_with = "folder_names")]
     pub exclude_folders: Vec<String>,
-    #[serde(default, deserialize_with = "unique_rules")]
-    pub rules: BTreeMap<String, RuleConfig>,
+    #[serde(default)]
+    lint: RuleSection,
+    #[serde(default)]
+    security: RuleSection,
+    #[serde(rename = "rules", default, deserialize_with = "optional_unique_rules")]
+    legacy_rules: Option<BTreeMap<String, RuleConfig>>,
 }
 
 impl Default for Config {
@@ -166,7 +185,9 @@ impl Default for Config {
             version: schema_version(),
             fail_on: FailOn::default(),
             exclude_folders: Vec::new(),
-            rules: BTreeMap::new(),
+            lint: RuleSection::default(),
+            security: RuleSection::default(),
+            legacy_rules: None,
         }
     }
 }
@@ -221,12 +242,52 @@ where
     deserializer.deserialize_map(UniqueRules)
 }
 
+/// Preserves absence for legacy detection while rejecting explicit null maps.
+fn optional_unique_rules<'de, D>(
+    deserializer: D,
+) -> Result<Option<BTreeMap<String, RuleConfig>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct OptionalUniqueRules;
+    impl<'de> serde::de::Visitor<'de> for OptionalUniqueRules {
+        type Value = Option<BTreeMap<String, RuleConfig>>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a mapping of unique rule identifiers to rule options")
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            unique_rules(deserializer).map(Some)
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Err(E::custom("rules must be a mapping"))
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Err(E::custom("rules must be a mapping"))
+        }
+    }
+
+    deserializer.deserialize_option(OptionalUniqueRules)
+}
+
 impl Config {
     /// Loads configuration validated against an explicit rule registry
     /// for the selected command; no ancestor discovery. Returns path-qualified
     /// I/O/schema errors for invalid options or rule IDs.
-    pub fn load_for(path: &Path, rules: &[&dyn Rule]) -> io::Result<Self> {
-        let result = fs::read_to_string(path).and_then(|text| Self::parse_for(&text, rules));
+    pub fn load_for(path: &Path, category: RuleCategory) -> io::Result<Self> {
+        let result = fs::read_to_string(path).and_then(|text| Self::parse_for(&text, category));
         result.map_err(|error| {
             io::Error::new(
                 error.kind(),
@@ -235,21 +296,29 @@ impl Config {
         })
     }
 
-    /// Deserializes and validates a complete YAML configuration against `BUILT_INS`.
+    /// Deserializes and validates a complete configuration against both registries.
     #[cfg(test)]
     fn parse(text: &str) -> io::Result<Self> {
-        Self::parse_for(text, BUILT_INS)
+        Self::parse_for(text, RuleCategory::Lint)
     }
 
     /// Deserializes and validates a complete YAML configuration against an
-    /// explicit rule registry.
-    fn parse_for(text: &str, rules: &[&dyn Rule]) -> io::Result<Self> {
+    /// explicit command category.
+    fn parse_for(text: &str, category: RuleCategory) -> io::Result<Self> {
         let config: Self = serde_yaml_ng::from_str(text)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         if config.version != 1 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "unsupported configuration version; expected 1",
+            ));
+        }
+        if config.legacy_rules.is_some()
+            && (!config.lint.rules.is_empty() || !config.security.rules.is_empty())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "top-level 'rules' cannot be combined with 'lint.rules' or 'security.rules'",
             ));
         }
         for name in &config.exclude_folders {
@@ -265,85 +334,118 @@ impl Config {
                 ));
             }
         }
-        for (id, options) in &config.rules {
-            if id == "minimum-saved-version" {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "rule 'minimum-saved-version' was renamed to 'saved-version'; rename the configuration key",
-                ));
-            }
-            if !rules.iter().any(|rule| rule.id() == id) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("unknown rule '{id}'"),
-                ));
-            }
-            for (name, bound) in [
-                ("minimum-version", options.minimum_version),
-                ("maximum-version", options.maximum_version),
-            ] {
-                if id != "saved-version" && bound.is_some() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("{name} is not supported by rule '{id}'"),
-                    ));
-                }
-            }
-            if let (Some(minimum), Some(maximum)) =
-                (options.minimum_version, options.maximum_version)
-                && minimum > maximum
-            {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "minimum-version must not exceed maximum-version",
-                ));
-            }
-            if id != "debugging-status" && options.fail_when.is_some() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("fail-when is not supported by rule '{id}'"),
-                ));
-            }
-            if id != "terminal-style" && options.preferred_style.is_some() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("preferred-style is not supported by rule '{id}'"),
-                ));
-            }
-            if id != "connector-pane-pattern" && options.allowed_patterns.is_some() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("allowed-patterns is not supported by rule '{id}'"),
-                ));
-            }
-            if id != "path-usage" && options.targets.is_some() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("targets is not supported by rule '{id}'"),
-                ));
-            }
-            if let Some(allowed) = &options.allowed_patterns {
-                if allowed.is_empty() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "connector-pane-pattern's allowed-patterns must name at least one pattern",
-                    ));
-                }
-                for name in allowed {
-                    if !crate::rules::quality::CONNECTOR_PANE_PATTERNS
-                        .iter()
-                        .any(|(known, _)| known == name)
-                    {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("unknown connector pane pattern '{name}'"),
-                        ));
-                    }
-                }
-            }
+        validate_rules(&config.lint.rules, QUALITY_BUILT_INS)?;
+        validate_rules(&config.security.rules, SECURITY_BUILT_INS)?;
+        if let Some(legacy_rules) = &config.legacy_rules {
+            validate_rules(legacy_rules, registry(category))?;
         }
         Ok(config)
     }
+
+    /// Returns overrides for the selected command, including legacy files.
+    pub fn rules(&self, category: RuleCategory) -> &BTreeMap<String, RuleConfig> {
+        if let Some(rules) = &self.legacy_rules
+            && !rules.is_empty()
+        {
+            return rules;
+        }
+        match category {
+            RuleCategory::Lint => &self.lint.rules,
+            RuleCategory::Security => &self.security.rules,
+        }
+    }
+}
+
+/// Returns the built-in registry used to validate a legacy top-level rule map.
+fn registry(category: RuleCategory) -> &'static [&'static dyn Rule] {
+    match category {
+        RuleCategory::Lint => QUALITY_BUILT_INS,
+        RuleCategory::Security => SECURITY_BUILT_INS,
+    }
+}
+
+/// Validates rule IDs and options against the selected command's registry.
+fn validate_rules(
+    rules_config: &BTreeMap<String, RuleConfig>,
+    rules: &[&dyn Rule],
+) -> io::Result<()> {
+    for (id, options) in rules_config {
+        if id == "minimum-saved-version" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "rule 'minimum-saved-version' was renamed to 'saved-version'; rename the configuration key",
+            ));
+        }
+        if !rules.iter().any(|rule| rule.id() == id) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unknown rule '{id}'"),
+            ));
+        }
+        for (name, bound) in [
+            ("minimum-version", options.minimum_version),
+            ("maximum-version", options.maximum_version),
+        ] {
+            if id != "saved-version" && bound.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{name} is not supported by rule '{id}'"),
+                ));
+            }
+        }
+        if let (Some(minimum), Some(maximum)) = (options.minimum_version, options.maximum_version)
+            && minimum > maximum
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "minimum-version must not exceed maximum-version",
+            ));
+        }
+        if id != "debugging-status" && options.fail_when.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("fail-when is not supported by rule '{id}'"),
+            ));
+        }
+        if id != "terminal-style" && options.preferred_style.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("preferred-style is not supported by rule '{id}'"),
+            ));
+        }
+        if id != "connector-pane-pattern" && options.allowed_patterns.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("allowed-patterns is not supported by rule '{id}'"),
+            ));
+        }
+        if id != "path-usage" && options.targets.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("targets is not supported by rule '{id}'"),
+            ));
+        }
+        if let Some(allowed) = &options.allowed_patterns {
+            if allowed.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "connector-pane-pattern's allowed-patterns must name at least one pattern",
+                ));
+            }
+            for name in allowed {
+                if !crate::rules::quality::CONNECTOR_PANE_PATTERNS
+                    .iter()
+                    .any(|(known, _)| known == name)
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unknown connector pane pattern '{name}'"),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -351,81 +453,64 @@ mod tests {
     use super::*;
 
     #[test]
-    fn example_configuration_covers_all_rules_with_their_defaults() {
+    fn example_configuration_covers_both_registries_with_their_defaults() {
         let config = Config::parse(include_str!("../docs/wirelint.example.yaml")).unwrap();
         assert_eq!(config.fail_on, FailOn::default());
-        assert_eq!(config.rules.len(), BUILT_INS.len());
-        for rule in BUILT_INS {
-            let options = config.rules.get(rule.id()).unwrap_or_else(|| {
-                panic!("configuration template is missing rule '{}'", rule.id())
-            });
-            assert!(options.enabled, "template disables rule '{}'", rule.id());
-            assert_eq!(
-                options.severity,
-                Some(rule.default_severity()),
-                "template severity differs from the default for '{}'",
-                rule.id()
-            );
+        for (category, rules) in [
+            (RuleCategory::Lint, QUALITY_BUILT_INS),
+            (RuleCategory::Security, SECURITY_BUILT_INS),
+        ] {
+            let configured = config.rules(category);
+            assert_eq!(configured.len(), rules.len());
+            for rule in rules {
+                let options = configured.get(rule.id()).unwrap_or_else(|| {
+                    panic!("configuration template is missing rule '{}'", rule.id())
+                });
+                assert!(options.enabled, "template disables rule '{}'", rule.id());
+                assert_eq!(
+                    options.severity,
+                    Some(rule.default_severity()),
+                    "template severity differs from the default for '{}'",
+                    rule.id()
+                );
+            }
         }
+        let lint_rules = config.rules(RuleCategory::Lint);
         assert_eq!(
-            config.rules["saved-version"].minimum_version,
+            lint_rules["saved-version"].minimum_version,
             Some(crate::rules::quality::DEFAULT_MINIMUM_VERSION)
         );
-        assert_eq!(config.rules["saved-version"].maximum_version, None);
+        assert_eq!(lint_rules["saved-version"].maximum_version, None);
         assert_eq!(
-            config.rules["debugging-status"].fail_when,
+            lint_rules["debugging-status"].fail_when,
             Some(DebuggingState::default())
         );
         assert_eq!(
-            config.rules["terminal-style"].preferred_style,
+            lint_rules["terminal-style"].preferred_style,
             Some(TerminalDisplayStyle::default())
         );
     }
 
     #[test]
-    fn sast_example_configuration_covers_all_security_rules_with_their_defaults() {
-        let config = Config::parse_for(
-            include_str!("../docs/wirelint-sast.example.yaml"),
-            crate::rules::sast::BUILT_INS,
-        )
-        .unwrap();
-        assert_eq!(config.rules.len(), crate::rules::sast::BUILT_INS.len());
-        for rule in crate::rules::sast::BUILT_INS {
-            let options = config.rules.get(rule.id()).unwrap_or_else(|| {
-                panic!(
-                    "SAST configuration template is missing rule '{}'",
-                    rule.id()
-                )
-            });
-            assert!(options.enabled, "template disables rule '{}'", rule.id());
-            assert_eq!(
-                options.severity,
-                Some(rule.default_severity()),
-                "template severity differs from the default for '{}'",
-                rule.id()
-            );
-        }
-    }
-
-    #[test]
     fn loads_defaults_and_explicit_overrides() {
         let defaults = Config::parse("{}").unwrap();
-        assert!(defaults.rules.is_empty());
+        assert!(defaults.rules(RuleCategory::Lint).is_empty());
+        assert!(defaults.rules(RuleCategory::Security).is_empty());
         assert!(defaults.exclude_folders.is_empty());
         assert_eq!(defaults.fail_on, FailOn::Error);
         let config = Config::parse(
             "version: 1\nfail-on: warning\nrules:\n  separate-compiled-code:\n    enabled: false\n    severity: error\n",
         ).unwrap();
         assert_eq!(config.fail_on, FailOn::Warning);
-        assert!(!config.rules["separate-compiled-code"].enabled);
+        assert!(!config.rules(RuleCategory::Lint)["separate-compiled-code"].enabled);
         assert_eq!(
-            config.rules["separate-compiled-code"].severity,
+            config.rules(RuleCategory::Lint)["separate-compiled-code"].severity,
             Some(Severity::Error)
         );
         assert!(
             Config::parse("rules:\n  separate-compiled-code: {}")
                 .unwrap()
-                .rules["separate-compiled-code"]
+                .rules(RuleCategory::Lint)["separate-compiled-code"]
                 .enabled
         );
     }
@@ -443,7 +528,7 @@ mod tests {
         }
         let config = Config::parse("rules:\n  path-usage:\n    targets: [linux]\n").unwrap();
         assert_eq!(
-            config.rules["path-usage"].targets,
+            config.rules(RuleCategory::Lint)["path-usage"].targets,
             Some(vec![PathTarget::Linux])
         );
     }
@@ -492,10 +577,23 @@ mod tests {
             "rules:\n  separate-compiled-code:\n    enabled: false\n    enabled: true",
             "rules:\n  separate-compiled-code: {}\n  separate-compiled-code: {}",
             "rules: []",
+            "rules: null",
+            "rules:\n  separate-compiled-code: {}\nlint:\n  rules:\n    saved-version: {}",
             "version: [",
             "{}\n---\n{}",
         ] {
             assert!(Config::parse(yaml).is_err(), "{yaml}");
+        }
+    }
+
+    #[test]
+    fn rejects_rules_in_the_wrong_category() {
+        for yaml in [
+            "security:\n  rules:\n    separate-compiled-code: {}",
+            "lint:\n  rules:\n    hardcoded-secret-default: {}",
+        ] {
+            let error = Config::parse(yaml).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{yaml}");
         }
     }
 
@@ -520,7 +618,7 @@ mod tests {
             let config =
                 Config::parse(&format!("rules:\n  saved-version:\n    {option}: '21.3'\n"))
                     .unwrap();
-            let options = &config.rules["saved-version"];
+            let options = &config.rules(RuleCategory::Lint)["saved-version"];
             assert_eq!(
                 if option == "minimum-version" {
                     options.minimum_version
@@ -590,7 +688,10 @@ mod tests {
                 "rules:\n  debugging-status:\n    fail-when: {value}\n"
             ))
             .unwrap();
-            assert_eq!(config.rules["debugging-status"].fail_when, Some(expected));
+            assert_eq!(
+                config.rules(RuleCategory::Lint)["debugging-status"].fail_when,
+                Some(expected)
+            );
         }
         for value in ["true", "false", "null", "0", "Enabled", "other", "[]"] {
             assert!(
@@ -617,7 +718,7 @@ mod tests {
             ))
             .unwrap();
             assert_eq!(
-                config.rules["terminal-style"].preferred_style,
+                config.rules(RuleCategory::Lint)["terminal-style"].preferred_style,
                 Some(expected)
             );
         }

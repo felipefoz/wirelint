@@ -36,10 +36,9 @@ traversal. The [configuration template](../wirelint.example.yaml) excludes
 ## Rules and configuration
 
 ```text
-wirelint rules
 wirelint lint path/to/project --config checks.yaml
 wirelint lint path/to/project --fail-on warning
-wirelint security path/to/project --config sast-checks.yaml
+wirelint security path/to/project --config checks.yaml
 ```
 
 `lint` replaces the former `scan` command; update existing scripts to use
@@ -55,7 +54,8 @@ The `debugging-status` rule flags debugging-enabled VIs by default.
 Set its YAML option `fail-when: disabled` to flag the opposite state.
 The `saved-version` rule accepts inclusive `minimum-version` and
 `maximum-version` YAML options. Setting only a maximum applies no minimum.
-`security` uses a separate rule registry and configuration. Its
+`security` uses a separate rule registry and its own section in the shared
+configuration file. Its
 `hardcoded-secret-default` rule flags credentials stored in VI string
 defaults and scalar diagram string constants: values of credential-named
 controls or constants, key/value assignments, URL credentials, private keys,

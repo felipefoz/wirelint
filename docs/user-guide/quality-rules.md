@@ -1,11 +1,8 @@
 # Quality and hygiene rules
 
 WireLint calls its static-analysis tests **rules**, to distinguish them from
-the Rust tests that verify WireLint itself. List the built-in rules with:
-
-```text
-wirelint rules
-```
+the Rust tests that verify WireLint itself. This guide documents their stable
+IDs, defaults, and behavior.
 
 These quality and source-control hygiene rules run with `wirelint lint`. All
 are enabled by default and have a stable ID, default severity, and shared

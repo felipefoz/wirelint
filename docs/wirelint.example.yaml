@@ -1,5 +1,5 @@
 # Copy this file and pass your copy with --config.
-# Keep every built-in rule listed here with its default options.
+# Keep every built-in rule listed under its command with its default options.
 version: 1
 
 # Fail for error findings. Use warning to also fail for warning findings,
@@ -11,69 +11,85 @@ exclude-folders:
   - .git
   - .lv-venv
 
-rules:
-  # In a VI block diagram, a free label such as
-  # "#wirelint-ignore file-description" skips that rule for that VI.
-  # XML projects, libraries, and classes accept the same directive on its own
-  # line in their native description; directive-only text is not a description.
-  # Require separate compiled code from source for VI-family files and
-  # the equivalent new-item setting on projects, libraries, and classes.
-  separate-compiled-code:
-    enabled: true
-    severity: warning
-  # Check each file's saved LabVIEW release (including XML editor versions).
-  # Add maximum-version: "21.0" for an inclusive upper bound.
-  # With only maximum-version set, no minimum applies.
-  saved-version:
-    enabled: true
-    severity: warning
-    minimum-version: "20.0"
-  # Require a non-empty native description on every supported LabVIEW file.
-  # VI Documentation on vi-like files and description on project like files.
-  file-description:
-    enabled: true
-    severity: warning
-  # Report VIs with Allow debugging enabled. Use disabled to reverse the check.
-  debugging-status:
-    enabled: true
-    severity: warning
-    fail-when: enabled
-  # Reject VIs saved with block diagram breakpoints.
-  no-breakpoints:
-    enabled: true
-    severity: error
-  # Warn about VIs saved with automatic error handling enabled.
-  auto-error-handling:
-    enabled: true
-    severity: warning
-  # Warn when a VI or VI template has a password set.
-  password-set:
-    enabled: true
-    severity: warning
-  # Reject a VI that points to a scanned library which does not list it.
-  orphaned-vi:
-    enabled: true
-    severity: error
-  # Warn when LabVIEW class XML contains mutation-history content.
-  class-mutation-history:
-    enabled: true
-    severity: warning
-  # Require every control and indicator terminal on a VI's block diagram to
-  # use the same preferred display style. Use icon to require View As Icon
-  # instead.
-  terminal-style:
-    enabled: true
-    severity: warning
-    preferred-style: data-type
-  # Restrict VI connector panes to a set of allowed terminal patterns, named
-  # like "4x2x2x4" (see the user guide for the full list of 36 names).
-  connector-pane-pattern:
-    enabled: true
-    severity: warning
-    allowed-patterns:
-      - "4x2x2x4"
-  # Check scalar path literals and defaults against both target platforms.
-  path-usage:
-    enabled: true
-    severity: warning
-    targets: [windows, linux]
+lint:
+  rules:
+    # In a VI block diagram, a free label such as
+    # "#wirelint-ignore file-description" skips that rule for that VI.
+    # XML projects, libraries, and classes accept the same directive on its own
+    # line in their native description; directive-only text is not a description.
+    # Require separate compiled code from source for VI-family files and
+    # the equivalent new-item setting on projects, libraries, and classes.
+    separate-compiled-code:
+      enabled: true
+      severity: warning
+    # Check each file's saved LabVIEW release (including XML editor versions).
+    # Add maximum-version: "21.0" for an inclusive upper bound.
+    # With only maximum-version set, no minimum applies.
+    saved-version:
+      enabled: true
+      severity: warning
+      minimum-version: "20.0"
+    # Require a non-empty native description on every supported LabVIEW file.
+    # VI Documentation on vi-like files and description on project like files.
+    file-description:
+      enabled: true
+      severity: warning
+    # Report VIs with Allow debugging enabled. Use disabled to reverse the check.
+    debugging-status:
+      enabled: true
+      severity: warning
+      fail-when: enabled
+    # Reject VIs saved with block diagram breakpoints.
+    no-breakpoints:
+      enabled: true
+      severity: error
+    # Warn about VIs saved with automatic error handling enabled.
+    auto-error-handling:
+      enabled: true
+      severity: warning
+    # Warn when a VI or VI template has a password set.
+    password-set:
+      enabled: true
+      severity: warning
+    # Reject a VI that points to a scanned library which does not list it.
+    orphaned-vi:
+      enabled: true
+      severity: error
+    # Warn when LabVIEW class XML contains mutation-history content.
+    class-mutation-history:
+      enabled: true
+      severity: warning
+    # Require every control and indicator terminal on a VI's block diagram to
+    # use the same preferred display style. Use icon to require View As Icon
+    # instead.
+    terminal-style:
+      enabled: true
+      severity: warning
+      preferred-style: data-type
+    # Restrict VI connector panes to a set of allowed terminal patterns, named
+    # like "4x2x2x4" (see the user guide for the full list of 36 names).
+    connector-pane-pattern:
+      enabled: true
+      severity: warning
+      allowed-patterns:
+        - "4x2x2x4"
+    # Check scalar path literals and defaults against both target platforms.
+    path-usage:
+      enabled: true
+      severity: warning
+      targets: [windows, linux]
+
+security:
+  rules:
+    # Flag credentials in VI string defaults and scalar diagram constants:
+    # Credential-named controls/constants, assignments, URLs, keys, and tokens.
+    # The finding does not include the stored value.
+    hardcoded-secret-default:
+      enabled: true
+      severity: warning
+
+    # Review front-panel control influence on NI System Exec's command line.
+    # Supports direct wires and Concatenate Strings; unknown paths are errors.
+    system-exec-command-input:
+      enabled: true
+      severity: warning

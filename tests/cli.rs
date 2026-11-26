@@ -1895,10 +1895,7 @@ fn sast_rejects_quality_rule_configuration() {
     let error = String::from_utf8(sast.stderr).unwrap();
     assert!(error.contains("separate-compiled-code"), "{error}");
 
-    let config = directory.write(
-        "sast.yaml",
-        include_str!("../docs/wirelint-sast.example.yaml"),
-    );
+    let config = directory.write("checks.yaml", include_str!("../docs/wirelint.example.yaml"));
     let sast = Command::new(env!("CARGO_BIN_EXE_wirelint"))
         .arg("security")
         .arg(&directory.0)
@@ -1911,6 +1908,27 @@ fn sast_rejects_quality_rule_configuration() {
         "{}",
         String::from_utf8_lossy(&sast.stderr)
     );
+
+    let lint = directory.configured_scan(&config, &[]);
+    assert!(
+        lint.status.success(),
+        "{}",
+        String::from_utf8_lossy(&lint.stderr)
+    );
+
+    let misplaced = directory.write(
+        "misplaced.yaml",
+        "security:\n  rules:\n    separate-compiled-code: {}\n",
+    );
+    let error = Command::new(env!("CARGO_BIN_EXE_wirelint"))
+        .arg("security")
+        .arg(&directory.0)
+        .arg("--config")
+        .arg(&misplaced)
+        .output()
+        .unwrap();
+    assert_eq!(error.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&error.stderr).contains("separate-compiled-code"));
 }
 
 #[test]
@@ -2201,23 +2219,7 @@ fn gitlab_sast_report_is_rejected_by_scan() {
 }
 
 #[test]
-fn lists_rules_and_handles_an_empty_folder() {
-    let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("rules")
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let rules = String::from_utf8(output.stdout).unwrap();
-    assert!(rules.contains("separate-compiled-code [lint, warning]"));
-    assert!(rules.contains("saved-version [lint, warning]"));
-    assert!(!rules.contains("minimum-saved-version"));
-    assert!(rules.contains("file-description [lint, warning]"));
-    assert!(rules.contains("debugging-status [lint, warning]"));
-    assert!(rules.contains("no-breakpoints [lint, error]"));
-    assert!(rules.contains("auto-error-handling [lint, warning]"));
-    assert!(rules.contains("password-set [lint, warning]"));
-    assert!(rules.contains("hardcoded-secret-default [security, warning] (CWE-798, CWE-259)"));
-    assert!(rules.contains("system-exec-command-input [security, warning] (CWE-78, CWE-88)"));
+fn empty_folders_have_successful_quality_and_security_summaries() {
     let directory = TestDirectory::new();
     for args in [vec![], vec!["--verbose"]] {
         let output = directory.scan(&args);
