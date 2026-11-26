@@ -8,15 +8,15 @@ Run both commands from the repository root and inspect their findings and
 analysis errors:
 
 ```text
-cargo run -- scan tests/fixtures --verbose --fail-on none
-cargo run -- sast tests/fixtures --verbose --fail-on none
+cargo run -- lint tests/fixtures --verbose --fail-on none
+cargo run -- security tests/fixtures --verbose --fail-on none
 ```
 
 The connector-pane fixtures include a normal VI and global and polymorphic VIs.
 The rule requires its fixture-specific configuration:
 
 ```text
-cargo run -- scan tests/fixtures/quality/connector-pane-pattern --config tests/fixtures/quality/connector-pane-pattern/checks.yaml --verbose --fail-on none
+cargo run -- lint tests/fixtures/quality/connector-pane-pattern --config tests/fixtures/quality/connector-pane-pattern/checks.yaml --verbose --fail-on none
 ```
 
 The saved-version folder contains a LabVIEW-saved VI and a synthetic XML
@@ -24,7 +24,7 @@ library. Its configuration reports the VI above, and the library below, the
 permitted LabVIEW 20.0 release:
 
 ```text
-cargo run -- scan tests/fixtures/quality/saved-version --config tests/fixtures/quality/saved-version/checks.yaml --verbose --fail-on none
+cargo run -- lint tests/fixtures/quality/saved-version --config tests/fixtures/quality/saved-version/checks.yaml --verbose --fail-on none
 ```
 
 The password-protected VI uses the fixture-only password

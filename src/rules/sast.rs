@@ -1,4 +1,4 @@
-//! Built-in security analysis rules, run by `wirelint sast`.
+//! Built-in security analysis rules, run by `wirelint security`.
 //!
 //! This module only registers rules; each rule and its detection logic live
 //! in their own submodule.
@@ -10,7 +10,7 @@ use super::Rule;
 use hardcoded_secret::HardcodedSecretDefault;
 use system_exec::SystemExecCommandInput;
 
-/// All built-in security rules, run by `wirelint sast`.
+/// All built-in security rules, run by `wirelint security`.
 pub static BUILT_INS: &[&dyn Rule] = &[&HardcodedSecretDefault, &SystemExecCommandInput];
 
 #[cfg(test)]

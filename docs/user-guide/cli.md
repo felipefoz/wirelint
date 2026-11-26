@@ -3,16 +3,16 @@
 Build and run WireLint from the repository:
 
 ```text
-cargo run -- scan path/to/labview/project
+cargo run -- lint path/to/labview/project
 ```
 
 Or, after building or installing the executable:
 
 ```text
-wirelint scan path/to/labview/project
+wirelint lint path/to/labview/project
 ```
 
-The scan command recursively searches the specified folder and runs enabled
+The lint command recursively searches the specified folder and runs enabled
 built-in analysis rules. Extension matching is case-insensitive. Files are read
 without launching LabVIEW or modifying source files.
 
@@ -37,13 +37,16 @@ traversal. The [configuration template](../wirelint.example.yaml) excludes
 
 ```text
 wirelint rules
-wirelint scan path/to/project --config checks.yaml
-wirelint scan path/to/project --fail-on warning
-wirelint sast path/to/project --config sast-checks.yaml
+wirelint lint path/to/project --config checks.yaml
+wirelint lint path/to/project --fail-on warning
+wirelint security path/to/project --config sast-checks.yaml
 ```
 
+`lint` replaces the former `scan` command; update existing scripts to use
+`lint`. `sast` remains an alias for the primary `security` command.
+
 All rules in the selected command are enabled by default, with their default
-severities. `scan` rules check compiled-code separation, saved LabVIEW version
+severities. `lint` rules check compiled-code separation, saved LabVIEW version
 bounds (default minimum `20.0`, no maximum), file descriptions, VI debugging
 status, and saved block diagram breakpoints. The `no-breakpoints` rule defaults to
 `error` severity, so findings fail the default threshold. Other built-in rules
@@ -52,7 +55,7 @@ The `debugging-status` rule flags debugging-enabled VIs by default.
 Set its YAML option `fail-when: disabled` to flag the opposite state.
 The `saved-version` rule accepts inclusive `minimum-version` and
 `maximum-version` YAML options. Setting only a maximum applies no minimum.
-`sast` uses a separate rule registry and configuration. Its
+`security` uses a separate rule registry and configuration. Its
 `hardcoded-secret-default` rule flags credentials stored in VI string
 defaults and scalar diagram string constants: values of credential-named
 controls or constants, key/value assignments, URL credentials, private keys,
@@ -74,14 +77,14 @@ threshold, so it also works without `--config`. See the
 [configuration guide](configuration.md), [quality rules](quality-rules.md),
 and [security analysis rules](sast-rules.md).
 
-## Full scan command example
+## Full lint command example
 
 The scan options can be combined in one invocation. This example loads
 `checks.yaml`, overrides its failure threshold, prints individual findings,
 and writes a GitLab code quality report:
 
 ```text
-wirelint scan . --config checks.yaml --fail-on warning --verbose --format gitlab-code-quality --output gl-code-quality-report.json
+wirelint lint . --config checks.yaml --fail-on warning --verbose --format gitlab-code-quality --output gl-code-quality-report.json
 ```
 
 `--format` and `--output` must be used together. See [CI report files](#ci-report-files)
@@ -90,8 +93,8 @@ for report behavior and format details.
 ## Output and exit statuses
 
 The terminal report starts with the number of discovered files and a message
-that enabled rules are running, followed by the scan type: `scan (quality)`
-or `sast (security)`. It does not list every discovered path.
+that enabled rules are running, followed by the scan type: `lint (quality)`
+or `security (security)`. It does not list every discovered path.
 By default, findings are summarized by severity and rule, without individual
 file paths or messages. Rule totals are sorted by rule ID; rules with no
 findings are omitted. If there are no findings, both breakdowns are omitted.
@@ -100,7 +103,7 @@ For example:
 
 ```text
 Found 120 supported LabVIEW file(s). Running enabled rules...
-Scan type: scan (quality)
+Scan type: lint (quality)
 Analyzed 120 file(s); 35 finding(s); 0 analysis error(s).
 Elapsed scan time: 0.123 s.
 Findings by severity: 0 info; 35 warning; 0 error.
@@ -112,7 +115,7 @@ Use `--verbose` (or `-v`) to include individual findings before the same
 summary:
 
 ```text
-wirelint scan path/to/project --verbose
+wirelint lint path/to/project --verbose
 ```
 
 Individual findings and analysis errors include their relative file paths,
@@ -153,9 +156,9 @@ not analysis errors.
 ## CI report files
 
 ```text
-wirelint scan . --format gitlab-code-quality --output gl-code-quality-report.json
-wirelint sast . --format gitlab-sast --output gl-sast-report.json
-wirelint scan . --format sarif --output wirelint.sarif
+wirelint lint . --format gitlab-code-quality --output gl-code-quality-report.json
+wirelint security . --format gitlab-sast --output gl-sast-report.json
+wirelint lint . --format sarif --output wirelint.sarif
 ```
 
 `--format` and `--output` must be supplied together. Each invocation writes one
@@ -212,4 +215,5 @@ See [CI integration](ci-reports.md) for GitLab and GitHub upload examples.
 
 See the [project roadmap](../roadmap.md) for features explicitly deferred in
 the decision records.
-Use `wirelint --help` and `wirelint scan --help` for CLI help.
+Use `wirelint --help`, `wirelint lint --help`, and `wirelint security --help`
+for CLI help.

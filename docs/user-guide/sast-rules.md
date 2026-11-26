@@ -1,7 +1,7 @@
 # Security analysis rules
 
-Security rules run with `wirelint sast` and are listed separately from the
-quality and source-control hygiene rules used by `wirelint scan`. They read
+Security rules run with `wirelint security` and are listed separately from the
+quality and source-control hygiene rules used by `wirelint lint`. They read
 stored facts from LabVIEW files. The System Exec rule follows a limited set
 of local block-diagram connections.
 Findings are review signals, not confirmation of exploitability.

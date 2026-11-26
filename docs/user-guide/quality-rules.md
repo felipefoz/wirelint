@@ -7,7 +7,7 @@ the Rust tests that verify WireLint itself. List the built-in rules with:
 wirelint rules
 ```
 
-These quality and source-control hygiene rules run with `wirelint scan`. All
+These quality and source-control hygiene rules run with `wirelint lint`. All
 are enabled by default and have a stable ID, default severity, and shared
 `enabled` and `severity` configuration options. See
 [configuration](configuration.md) for YAML examples and exit thresholds.

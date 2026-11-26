@@ -6,7 +6,7 @@ default severity, uses the `error` failure threshold, and excludes no folders.
 Load YAML explicitly:
 
 ```text
-wirelint scan path/to/project --config checks.yaml
+wirelint lint path/to/project --config checks.yaml
 ```
 
 There is no automatic configuration-file discovery. The configuration path is
@@ -15,17 +15,17 @@ relative to the current working directory, not the scanned folder.
 ## Configuration template
 
 Copy [`wirelint.example.yaml`](../wirelint.example.yaml) as a starting point,
-or use it directly for `scan` from the repository root:
+or use it directly for `lint` from the repository root:
 
 ```text
-wirelint scan path/to/project --config docs/wirelint.example.yaml
+wirelint lint path/to/project --config docs/wirelint.example.yaml
 ```
 
-`sast` has a separate registry and template,
+`security` has a separate registry and template,
 [`wirelint-sast.example.yaml`](../wirelint-sast.example.yaml):
 
 ```text
-wirelint sast path/to/project --config docs/wirelint-sast.example.yaml
+wirelint security path/to/project --config docs/wirelint-sast.example.yaml
 ```
 
 Each template lists every rule in its command's registry with its default
@@ -165,7 +165,7 @@ same threshold; verbosity is a CLI presentation option, not a YAML setting.
 The command-line threshold overrides YAML:
 
 ```text
-wirelint scan path/to/project --config checks.yaml --fail-on warning
+wirelint lint path/to/project --config checks.yaml --fail-on warning
 ```
 
 If all rules are disabled, discovery still runs, but file contents are not read

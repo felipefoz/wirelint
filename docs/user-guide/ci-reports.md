@@ -17,7 +17,7 @@ Add a job to your pipeline:
 ```yaml
 wirelint:
   script:
-    - wirelint scan . --format gitlab-code-quality --output gl-code-quality-report.json --fail-on warning
+    - wirelint lint . --format gitlab-code-quality --output gl-code-quality-report.json --fail-on warning
   artifacts:
     when: always
     reports:
@@ -42,7 +42,7 @@ a SAST artifact:
 ```yaml
 wirelint_sast:
   script:
-    - wirelint sast . --format gitlab-sast --output gl-sast-report.json
+    - wirelint security . --format gitlab-sast --output gl-sast-report.json
   artifacts:
     when: always
     reports:
@@ -72,7 +72,7 @@ steps:
   # Checkout and install/build WireLint before these steps.
   - name: Run WireLint
     id: wirelint
-    run: wirelint scan . --format sarif --output wirelint.sarif --fail-on warning
+    run: wirelint lint . --format sarif --output wirelint.sarif --fail-on warning
 
   - name: Upload WireLint SARIF
     if: ${{ !cancelled() && steps.wirelint.outcome != 'skipped' && hashFiles('wirelint.sarif') != '' }}

@@ -33,7 +33,7 @@ enum Command {
         after_long_help = "The path-usage rule reports empty ordinary scalar path constants, absolute scalar paths, and invalid path syntax. Its targets option accepts windows and/or linux (default: both). Attach a '#wirelint-ignore path-usage' free-label comment arrow to a constant or front-panel control/terminal to ignore only that object's values. Linked front-panel pane labels are supported; unlinked front-panel labels are inert. Invalid links and linked directives for VI-wide rules are analysis errors. Ignores never suppress analysis errors.",
         long_about = "Recursively analyze .vi, .vit, .vim, .ctl, .lvproj, .lvclass, and .lvlib files (case-insensitive). Skip .llb archives and symbolic links below the root. An unlinked '#wirelint-ignore RULE-ID' directive in a VI block-diagram free label or on a standalone line in an XML file's own description skips that enabled rule's findings for that file and is reported on stdout. Directive lines alone do not satisfy file-description. All built-in rules are enabled by default, including saved-version with a minimum saved LabVIEW version of 20.0 and no maximum. The class-mutation-history rule warns when an .lvclass contains mutation-history content in its NI.LVClass.Geneology XML property. The orphaned-vi rule resolves owner paths relative to the VI file and library member URLs relative to the library file. Library VI items without a URL attribute are skipped. The connector-pane-pattern rule skips global and polymorphic VIs without a connector pane. The auto-error-handling rule skips global and polymorphic VIs because they have no executable diagram of their own. Configure inclusive minimum-version and/or maximum-version bounds in YAML; a maximum-only configuration has no minimum. The debugging-status rule flags VIs with debugging enabled by default; set fail-when: disabled in YAML to reverse the check. The no-breakpoints rule reports VIs saved with block diagram breakpoints as errors by default. Print the scan type on stdout. Show summary totals and elapsed scan time by default; use --verbose for individual findings, without listing every discovered path. Elapsed time covers discovery and analysis, excluding configuration loading and final report rendering. Analysis errors always include file details. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error. Unsupported binary formats are errors, never passing checks."
     )]
-    Scan {
+    Lint {
         /// Folder to scan.
         #[arg(value_name = "FOLDER")]
         folder: PathBuf,
@@ -55,10 +55,11 @@ enum Command {
     },
     /// Discover LabVIEW files and run enabled security analysis rules.
     #[command(
+        visible_alias = "sast",
         after_long_help = "A '#wirelint-ignore RULE-ID' free-label comment arrow suppresses only the linked string constant/control for hardcoded-secret-default, or the linked System Exec call node for system-exec-command-input. Unlinked diagram directives remain file-wide. Linked front-panel pane labels are supported; unlinked front-panel labels are inert. Invalid links are analysis errors. Ignores never suppress incomplete analysis or other analysis errors.",
-        long_about = "Recursively analyze the same file types as 'scan', using a separate security-focused rule registry (see 'wirelint rules'). Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults and scalar block-diagram string constants for credentials (credential-named controls and constants, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. The system-exec-command-input rule reviews front-panel control influence on NI System Exec.vi command input through direct wires or Concatenate Strings. Calls alone and constant-only commands are not findings. Unsupported call-link layouts or command paths are analysis errors, even with --fail-on none. Findings mean 'needs review', not 'confirmed exploitable'. Use --format gitlab-sast to write a GitLab Security Report Schema report for artifacts:reports:sast. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
+        long_about = "Recursively analyze the same file types as 'lint', using a separate security-focused rule registry (see 'wirelint rules'). Print the scan type on stdout. The hardcoded-secret-default rule checks VI string defaults and scalar block-diagram string constants for credentials (credential-named controls and constants, key/value assignments, URL credentials, private keys, and well-known token formats) and does not report the stored value. The system-exec-command-input rule reviews front-panel control influence on NI System Exec.vi command input through direct wires or Concatenate Strings. Calls alone and constant-only commands are not findings. Unsupported call-link layouts or command paths are analysis errors, even with --fail-on none. Findings mean 'needs review', not 'confirmed exploitable'. Use --format gitlab-sast to write a GitLab Security Report Schema report for artifacts:reports:sast. Exit status: 0 = success, 1 = threshold reached, 2 = configuration, I/O, or analysis error."
     )]
-    Sast {
+    Security {
         /// Folder to scan.
         #[arg(value_name = "FOLDER")]
         folder: PathBuf,
@@ -104,7 +105,7 @@ impl From<ScanFormat> for Format {
 pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Result<u8> {
     match cli.command {
         Command::Rules => {
-            for (registry, rules) in [("scan", QUALITY_BUILT_INS), ("sast", SAST_BUILT_INS)] {
+            for (registry, rules) in [("lint", QUALITY_BUILT_INS), ("security", SAST_BUILT_INS)] {
                 for rule in rules {
                     let cwe = rule.cwe();
                     writeln!(
@@ -123,7 +124,7 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             }
             Ok(0)
         }
-        Command::Scan {
+        Command::Lint {
             folder,
             config,
             fail_on,
@@ -137,12 +138,12 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             verbose,
             format.map(Format::from),
             destination,
-            "scan (quality)",
+            "lint (quality)",
             QUALITY_BUILT_INS,
             output,
             errors,
         ),
-        Command::Sast {
+        Command::Security {
             folder,
             config,
             fail_on,
@@ -156,7 +157,7 @@ pub fn run(cli: Cli, output: &mut impl Write, errors: &mut impl Write) -> io::Re
             verbose,
             format,
             destination,
-            "sast (security)",
+            "security (security)",
             SAST_BUILT_INS,
             output,
             errors,
@@ -348,10 +349,10 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn accepts_scan_configuration_and_threshold() {
+    fn accepts_lint_configuration_and_threshold() {
         let cli = Cli::try_parse_from([
             "wirelint",
-            "scan",
+            "lint",
             "project",
             "--config",
             "checks.yaml",
@@ -361,22 +362,38 @@ mod tests {
         ])
         .unwrap();
         assert!(
-            matches!(cli.command, Command::Scan { folder, config: Some(config), fail_on: Some(FailOn::Warning), verbose: true, .. }
+            matches!(cli.command, Command::Lint { folder, config: Some(config), fail_on: Some(FailOn::Warning), verbose: true, .. }
             if folder == std::path::Path::new("project") && config == std::path::Path::new("checks.yaml"))
         );
         assert!(matches!(
-            Cli::try_parse_from(["wirelint", "scan", "project"])
+            Cli::try_parse_from(["wirelint", "lint", "project"])
                 .unwrap()
                 .command,
-            Command::Scan { verbose: false, .. }
+            Command::Lint { verbose: false, .. }
         ));
         assert!(matches!(
-            Cli::try_parse_from(["wirelint", "scan", "project", "-v"])
+            Cli::try_parse_from(["wirelint", "lint", "project", "-v"])
                 .unwrap()
                 .command,
-            Command::Scan { verbose: true, .. }
+            Command::Lint { verbose: true, .. }
         ));
-        assert!(Cli::try_parse_from(["wirelint", "scan", ".", "--fail-on", "info"]).is_err());
+        assert!(Cli::try_parse_from(["wirelint", "lint", ".", "--fail-on", "info"]).is_err());
+    }
+
+    #[test]
+    fn security_is_primary_and_sast_is_an_alias() {
+        for name in ["security", "sast"] {
+            assert!(matches!(
+                Cli::try_parse_from(["wirelint", name, "project", "--verbose"])
+                    .unwrap()
+                    .command,
+                Command::Security { verbose: true, .. }
+            ));
+        }
+        assert!(Cli::try_parse_from(["wirelint", "scan", "project"]).is_err());
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("security"), "{help}");
+        assert!(help.contains("sast"), "{help}");
     }
 
     #[test]
@@ -385,7 +402,7 @@ mod tests {
             assert!(
                 Cli::try_parse_from([
                     "wirelint",
-                    "scan",
+                    "lint",
                     ".",
                     "--format",
                     format,
@@ -402,7 +419,7 @@ mod tests {
     fn help_describes_rules_and_exit_behavior() {
         let mut command = Cli::command();
         let help = command
-            .find_subcommand_mut("scan")
+            .find_subcommand_mut("lint")
             .unwrap()
             .render_long_help()
             .to_string();
@@ -453,7 +470,7 @@ mod tests {
         assert!(help.contains("gitlab"), "{help}");
         assert!(!help.contains("gitlab-sast"), "{help}");
         let help = command
-            .find_subcommand_mut("sast")
+            .find_subcommand_mut("security")
             .unwrap()
             .render_long_help()
             .to_string();

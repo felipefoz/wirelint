@@ -6,7 +6,7 @@ use crate::rules::{Rule, Severity};
 
 mod path_usage;
 
-/// All built-in quality and hygiene rules, run by `wirelint scan`.
+/// All built-in quality and hygiene rules, run by `wirelint lint`.
 pub static BUILT_INS: &[&dyn Rule] = &[
     &SeparateCompiledCode,
     &SavedVersion,

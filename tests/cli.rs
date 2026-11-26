@@ -34,7 +34,7 @@ impl TestDirectory {
 
     fn scan(&self, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_wirelint"))
-            .arg("scan")
+            .arg("lint")
             .arg(&self.0)
             .args(args)
             .output()
@@ -43,7 +43,7 @@ impl TestDirectory {
 
     fn configured_scan(&self, config: &Path, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_wirelint"))
-            .arg("scan")
+            .arg("lint")
             .arg(&self.0)
             .arg("--config")
             .arg(config)
@@ -223,7 +223,7 @@ fn path_usage_checks_saved_values_and_configured_targets() {
     let run = |config: Option<&Path>| {
         let mut command = Command::new(env!("CARGO_BIN_EXE_wirelint"));
         command
-            .arg("scan")
+            .arg("lint")
             .arg(&fixtures)
             .args(["--verbose", "--fail-on", "none"]);
         if let Some(config) = config {
@@ -396,12 +396,17 @@ fn linked_bookmarks_filter_only_the_referenced_value_before_aggregation() {
     string.extend_from_slice(secret);
     for (command, rule, class, data) in [
         (
-            "scan",
+            "lint",
             "path-usage",
             91,
             b"PTH0\0\0\0\x06\0\0\0\x01\x01C".as_slice(),
         ),
-        ("sast", "hardcoded-secret-default", 81, string.as_slice()),
+        (
+            "security",
+            "hardcoded-secret-default",
+            81,
+            string.as_slice(),
+        ),
     ] {
         for (target, expected, other) in [
             (Some(10), Some("Reported value"), false),
@@ -555,7 +560,7 @@ fn invalid_links_and_global_ignores_cannot_hide_analysis_errors() {
 fn saved_arrow_fixtures_leave_the_second_offending_object_visible() {
     for (command, group, rule, file, remaining, ignored, scope) in [
         (
-            "scan",
+            "lint",
             "quality",
             "path-usage",
             "linked-ignore.vi",
@@ -564,7 +569,7 @@ fn saved_arrow_fixtures_leave_the_second_offending_object_visible() {
             "BDHb",
         ),
         (
-            "scan",
+            "lint",
             "quality",
             "path-usage",
             "linked-ignore-default.vi",
@@ -573,7 +578,7 @@ fn saved_arrow_fixtures_leave_the_second_offending_object_visible() {
             "FPHb",
         ),
         (
-            "sast",
+            "security",
             "sast",
             "hardcoded-secret-default",
             "linked-ignore.vi",
@@ -1135,7 +1140,7 @@ fn automatic_error_handling_skips_global_and_polymorphic_fixtures() {
         .join("quality")
         .join("auto-error-handling");
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("scan")
+        .arg("lint")
         .arg(&fixtures)
         .arg("--verbose")
         .output()
@@ -1180,7 +1185,7 @@ fn scans_xml_and_applies_yaml_severity_and_cli_threshold() {
         summary,
         [
             "Found 3 supported LabVIEW file(s). Running enabled rules...",
-            "Scan type: scan (quality)",
+            "Scan type: lint (quality)",
             "Analyzed 3 file(s); 2 finding(s); 0 analysis error(s).",
             "Findings by severity: 0 info; 2 warning; 0 error.",
             "Findings by rule:",
@@ -1648,7 +1653,7 @@ fn owner_fixtures_are_read_without_labview() {
         .join("support");
     for folder in ["class-neutral", "control-neutral"] {
         let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-            .arg("scan")
+            .arg("lint")
             .arg(fixtures.join(folder))
             .output()
             .unwrap();
@@ -1666,7 +1671,7 @@ fn example_fixtures_cover_bookmarks_and_terminal_styles() {
         .join("fixtures")
         .join("quality");
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("scan")
+        .arg("lint")
         .arg(&fixtures)
         .arg("--verbose")
         .output()
@@ -1718,7 +1723,7 @@ fn disabling_all_rules_skips_parsing() {
         scan_lines_without_timing(&stdout),
         [
             "Found 1 supported LabVIEW file(s). Running enabled rules...",
-            "Scan type: scan (quality)",
+            "Scan type: lint (quality)",
             "Analyzed 0 file(s); 0 finding(s); 0 analysis error(s).",
         ]
     );
@@ -1740,7 +1745,7 @@ fn passing_scan_omits_empty_breakdowns_in_both_modes() {
             scan_lines_without_timing(&stdout),
             [
                 "Found 1 supported LabVIEW file(s). Running enabled rules...",
-                "Scan type: scan (quality)",
+                "Scan type: lint (quality)",
                 "Analyzed 1 file(s); 0 finding(s); 0 analysis error(s).",
             ]
         );
@@ -1834,6 +1839,44 @@ fn invalid_or_missing_configuration_fails_before_scanning() {
 }
 
 #[test]
+fn security_and_sast_run_the_same_analysis() {
+    let directory = TestDirectory::new();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sast")
+        .join("hardcoded-secret-default")
+        .join("credentials-separated.vi");
+    directory.write("credentials.vi", fs::read(fixture).unwrap());
+    let outputs: Vec<_> = ["security", "sast"]
+        .into_iter()
+        .map(|command| {
+            Command::new(env!("CARGO_BIN_EXE_wirelint"))
+                .arg(command)
+                .arg(&directory.0)
+                .args(["--verbose", "--fail-on", "warning"])
+                .output()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(outputs[0].status.code(), Some(1));
+    assert_eq!(outputs[0].status.code(), outputs[1].status.code());
+    assert!(outputs[0].stderr.is_empty());
+    assert_eq!(outputs[0].stderr, outputs[1].stderr);
+    let primary = String::from_utf8_lossy(&outputs[0].stdout);
+    let alias = String::from_utf8_lossy(&outputs[1].stdout);
+    assert!(primary.contains("[hardcoded-secret-default]"), "{primary}");
+    assert!(
+        primary.contains("Scan type: security (security)"),
+        "{primary}"
+    );
+    assert_eq!(
+        scan_lines_without_timing(&primary),
+        scan_lines_without_timing(&alias)
+    );
+}
+
+#[test]
 fn sast_rejects_quality_rule_configuration() {
     let directory = TestDirectory::new();
     let config = directory.write("checks.yaml", "rules:\n  separate-compiled-code: {}\n");
@@ -1841,7 +1884,7 @@ fn sast_rejects_quality_rule_configuration() {
     assert!(scan.status.success());
 
     let sast = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&directory.0)
         .arg("--config")
         .arg(&config)
@@ -1857,7 +1900,7 @@ fn sast_rejects_quality_rule_configuration() {
         include_str!("../docs/wirelint-sast.example.yaml"),
     );
     let sast = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&directory.0)
         .arg("--config")
         .arg(&config)
@@ -1874,7 +1917,7 @@ fn sast_rejects_quality_rule_configuration() {
 fn sast_reports_control_defaults_in_separated_and_embedded_vis() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sast");
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&fixtures)
         .arg("--verbose")
         .output()
@@ -1885,7 +1928,7 @@ fn sast_reports_control_defaults_in_separated_and_embedded_vis() {
     assert!(
         stdout
             .lines()
-            .any(|line| line == "Scan type: sast (security)")
+            .any(|line| line == "Scan type: security (security)")
     );
     for file in ["credentials-embedded.vi", "credentials-separated.vi"] {
         assert!(
@@ -1915,7 +1958,7 @@ fn sast_reviews_only_control_influenced_system_exec_commands() {
     );
     let report_path = directory.0.join("report.json");
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&fixtures)
         .arg("--config")
         .arg(&config)
@@ -1995,7 +2038,7 @@ fn sast_reviews_only_control_influenced_system_exec_commands() {
     )
     .unwrap();
     let disabled = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&fixtures)
         .arg("--config")
         .arg(&config)
@@ -2029,7 +2072,7 @@ fn sast_reports_unsupported_call_links_as_errors_unless_the_rule_is_disabled() {
     let directory = TestDirectory::new();
     directory.write("unsupported.vi", &bytes);
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&directory.0)
         .args(["--fail-on", "none"])
         .output()
@@ -2048,7 +2091,7 @@ fn sast_reports_unsupported_call_links_as_errors_unless_the_rule_is_disabled() {
     unresolved[node_offset..node_offset + 4].copy_from_slice(&i32::MAX.to_be_bytes());
     directory.write("unsupported.vi", unresolved);
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&directory.0)
         .args(["--fail-on", "none"])
         .output()
@@ -2069,7 +2112,7 @@ fn sast_reports_unsupported_call_links_as_errors_unless_the_rule_is_disabled() {
     suppressed[offset..offset + 4].copy_from_slice(b"ZZZZ");
     directory.write("unsupported.vi", suppressed);
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&directory.0)
         .output()
         .unwrap();
@@ -2083,7 +2126,7 @@ fn sast_reports_unsupported_call_links_as_errors_unless_the_rule_is_disabled() {
         "rules:\n  system-exec-command-input:\n    enabled: false\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&directory.0)
         .arg("--config")
         .arg(config)
@@ -2103,7 +2146,7 @@ fn sast_writes_a_gitlab_security_report() {
     let directory = TestDirectory::new();
     let destination = directory.0.join("gl-sast-report.json");
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&fixtures)
         .args(["--format", "gitlab-sast", "--output"])
         .arg(&destination)
@@ -2165,16 +2208,16 @@ fn lists_rules_and_handles_an_empty_folder() {
         .unwrap();
     assert!(output.status.success());
     let rules = String::from_utf8(output.stdout).unwrap();
-    assert!(rules.contains("separate-compiled-code [scan, warning]"));
-    assert!(rules.contains("saved-version [scan, warning]"));
+    assert!(rules.contains("separate-compiled-code [lint, warning]"));
+    assert!(rules.contains("saved-version [lint, warning]"));
     assert!(!rules.contains("minimum-saved-version"));
-    assert!(rules.contains("file-description [scan, warning]"));
-    assert!(rules.contains("debugging-status [scan, warning]"));
-    assert!(rules.contains("no-breakpoints [scan, error]"));
-    assert!(rules.contains("auto-error-handling [scan, warning]"));
-    assert!(rules.contains("password-set [scan, warning]"));
-    assert!(rules.contains("hardcoded-secret-default [sast, warning] (CWE-798, CWE-259)"));
-    assert!(rules.contains("system-exec-command-input [sast, warning] (CWE-78, CWE-88)"));
+    assert!(rules.contains("file-description [lint, warning]"));
+    assert!(rules.contains("debugging-status [lint, warning]"));
+    assert!(rules.contains("no-breakpoints [lint, error]"));
+    assert!(rules.contains("auto-error-handling [lint, warning]"));
+    assert!(rules.contains("password-set [lint, warning]"));
+    assert!(rules.contains("hardcoded-secret-default [security, warning] (CWE-798, CWE-259)"));
+    assert!(rules.contains("system-exec-command-input [security, warning] (CWE-78, CWE-88)"));
     let directory = TestDirectory::new();
     for args in [vec![], vec!["--verbose"]] {
         let output = directory.scan(&args);
@@ -2185,13 +2228,13 @@ fn lists_rules_and_handles_an_empty_folder() {
             scan_lines_without_timing(&stdout),
             [
                 "No supported LabVIEW files found.",
-                "Scan type: scan (quality)",
+                "Scan type: lint (quality)",
                 "Analyzed 0 file(s); 0 finding(s); 0 analysis error(s).",
             ]
         );
     }
     let output = Command::new(env!("CARGO_BIN_EXE_wirelint"))
-        .arg("sast")
+        .arg("security")
         .arg(&directory.0)
         .output()
         .unwrap();
@@ -2202,7 +2245,7 @@ fn lists_rules_and_handles_an_empty_folder() {
         scan_lines_without_timing(&stdout),
         [
             "No supported LabVIEW files found.",
-            "Scan type: sast (security)",
+            "Scan type: security (security)",
             "Analyzed 0 file(s); 0 finding(s); 0 analysis error(s).",
         ]
     );
