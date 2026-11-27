@@ -546,7 +546,7 @@ pub(super) fn read_facts_with_orphaned_vi(
             )?;
             let vctp =
                 vctp_section.ok_or_else(|| invalid("missing VCTP consolidated type pool"))?;
-            let types = super::connector::read_vctp(table, table_size, data, vctp)
+            let types = super::vctp::read_vctp(table, table_size, data, vctp)
                 .map_err(|error| invalid(format!("VCTP type pool: {error}")))?;
             Some(super::typed_data::read_default_strings(
                 &types, dthp, &controls, version,

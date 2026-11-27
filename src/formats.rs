@@ -7,6 +7,7 @@ mod heap;
 mod path_values;
 mod rsrc;
 mod typed_data;
+mod vctp;
 mod xml;
 
 pub(crate) use call_links::CallLink;

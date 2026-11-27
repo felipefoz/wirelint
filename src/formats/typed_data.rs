@@ -9,10 +9,9 @@
 //! decode is skipped without affecting the others.
 
 use super::heap::ControlDefault;
-use super::{Version, connector, invalid, rsrc};
+use super::{Version, invalid, rsrc, vctp};
 use std::io;
 
-const MAX_TYPE_COUNT: usize = 1_000_000;
 const MAX_WALK_NODES: usize = 1_000_000;
 const MAX_NESTING_DEPTH: usize = 128;
 const TD_FLAG_HAS_LABEL: u8 = 1 << 6;
@@ -46,7 +45,7 @@ pub(super) fn read_default_strings(
     controls: &[ControlDefault],
     version: Version,
 ) -> io::Result<Vec<DefaultStringValue>> {
-    let (flat_offsets, top_level) = connector::parse_vctp_lists(types)
+    let (flat_offsets, top_level) = vctp::parse_vctp_lists(types)
         .map_err(|error| invalid(format!("VCTP TypeDesc lists: {error}")))?;
     let (count, index_shift) = dthp;
     let mut output = Vec::new();
@@ -117,11 +116,11 @@ pub(super) fn read_dthp(
     )?;
     let payload = rsrc::slice(record, 4, rsrc::number(record, 0)?)?;
     let mut cursor = 0;
-    let count = connector::read_variable(payload, &mut cursor)?;
+    let count = vctp::read_variable(payload, &mut cursor)?;
     let index_shift = if count == 0 {
         0
     } else {
-        connector::read_variable(payload, &mut cursor)?
+        vctp::read_variable(payload, &mut cursor)?
     };
     if cursor != payload.len() {
         return Err(invalid("unexpected DTHP heap type slice layout"));
@@ -256,7 +255,7 @@ fn descriptor(types: &[u8], offsets: &[usize], index: usize) -> io::Result<TypeD
         .get(index)
         .ok_or_else(|| invalid("TypeDesc flat index is out of range"))?;
     let mut cursor = offset;
-    let (kind, flags, length) = connector::read_td_header(types, &mut cursor)?;
+    let (kind, flags, length) = vctp::read_td_header(types, &mut cursor)?;
     let end = offset
         .checked_add(length)
         .ok_or_else(|| invalid("TypeDesc range overflow"))?;
@@ -281,17 +280,17 @@ fn descriptor(types: &[u8], offsets: &[usize], index: usize) -> io::Result<TypeD
             descriptor.dimensions = Some(dimension_count);
             descriptor
                 .clients
-                .push(connector::read_variable(types, &mut cursor)?);
+                .push(vctp::read_variable(types, &mut cursor)?);
         }
         0x50 => {
-            let client_count = connector::read_variable(types, &mut cursor)?;
-            if client_count > MAX_TYPE_COUNT {
+            let client_count = vctp::read_variable(types, &mut cursor)?;
+            if client_count > vctp::MAX_VCTP_ENTRIES {
                 return Err(invalid("cluster TypeDesc client count exceeds the limit"));
             }
             for _ in 0..client_count {
                 descriptor
                     .clients
-                    .push(connector::read_variable(types, &mut cursor)?);
+                    .push(vctp::read_variable(types, &mut cursor)?);
             }
         }
         0x30 | 0x37 if end.saturating_sub(cursor) >= 4 => cursor += 4,

@@ -9,13 +9,13 @@
 **Dependencies:**
 - sha2 (0.10)
 - serde_json (1)
-- serde_yaml_ng (0.10)
+- roxmltree (0.21)
 - clap (4.6.7) [features: derive]
 - serde (1) [features: derive]
+- serde_yaml_ng (0.10)
 - flate2 (1)
-- roxmltree (0.21)
 
-Generated: 2026-11-26 17:17:26 UTC  
+Generated: 2026-11-27 12:15:42 UTC  
 Created by: [cargo-llms-txt](https://github.com/masinc/cargo-llms-txt)
 
 ## Table of Contents
@@ -697,6 +697,9 @@ pub struct DefaultStringValue {
 ```
 
 A raw string default and its location among the VI's front-panel controls.
+
+
+## src\formats\vctp.rs
 
 
 ## src\formats\xml.rs

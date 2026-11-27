@@ -8,14 +8,10 @@
 //! from raw pattern codes to named layouts came from labview-mcp's harvested
 //! connector-pane tables. See THIRD_PARTY_NOTICES.md.
 
+use super::vctp::{self, read_td_header, read_variable};
 use super::{invalid, rsrc};
-use flate2::bufread::ZlibDecoder;
-use std::io::{self, Read};
+use std::io;
 
-/// Upper bound on the decompressed VCTP consolidated type pool; it holds
-/// every data type used by the VI, not only the connector pane's own type.
-const MAX_VCTP_SIZE: usize = 64 * 1024 * 1024;
-const MAX_VCTP_TYPE_COUNT: usize = 1_000_000;
 /// `TD_FULL_TYPE.Function`: the Type Descriptor kind describing a connector pane.
 const FUNCTION_TYPE: u8 = 0xF0;
 const POLY_VI_TYPE: u8 = 0xF2;
@@ -26,7 +22,7 @@ const PATTERN_COUNT: u16 = 36;
 /// Reads the VI's connector pane pattern index (0-35), or `None` for a
 /// polymorphic or global VI, which has no connector pane.
 ///
-/// `conp` and `vctp` are each a block's `(section_count_minus_one,
+/// `conp` and `type_pool` are each a block's `(section_count_minus_one,
 /// section_offset)` pair, as found in the RSRC block table. Malformed or
 /// out-of-range structures, and pattern codes outside the 36 known layouts,
 /// are errors; this never guesses a layout.
@@ -35,11 +31,11 @@ pub(super) fn read_pattern(
     table_size: usize,
     data: &[u8],
     conp: (usize, usize),
-    vctp: (usize, usize),
+    type_pool: (usize, usize),
 ) -> io::Result<Option<u8>> {
     let conp_type_id = read_conp(table, table_size, data, conp)?;
-    let decoded = read_vctp(table, table_size, data, vctp)?;
-    let (flat_offsets, top_level) = parse_vctp_lists(&decoded)?;
+    let decoded = vctp::read_vctp(table, table_size, data, type_pool)?;
+    let (flat_offsets, top_level) = vctp::parse_vctp_lists(&decoded)?;
     let flat_type_id = *conp_type_id
         .checked_sub(1)
         .and_then(|index| top_level.get(index))
@@ -85,92 +81,6 @@ fn read_conp(
     Ok(u16::from_be_bytes([payload[0], payload[1]]) as usize)
 }
 
-/// Reads and decompresses the zlib-coded `VCTP` consolidated type pool.
-pub(super) fn read_vctp(
-    table: &[u8],
-    table_size: usize,
-    data: &[u8],
-    (count_minus_one, section_offset): (usize, usize),
-) -> io::Result<Vec<u8>> {
-    if count_minus_one != 0 || section_offset < table_size {
-        return Err(invalid("unsupported VCTP section table"));
-    }
-    let section = rsrc::slice(table, section_offset, 20)?;
-    if rsrc::number(section, 0)? != 0 {
-        return Err(invalid("unsupported VCTP section index"));
-    }
-    let offset = rsrc::number(section, 12)?;
-    let record = rsrc::slice(data, offset, data.len().saturating_sub(offset))?;
-    let payload = rsrc::slice(record, 4, rsrc::number(record, 0)?)?;
-    if payload.len() < 4 {
-        return Err(invalid("truncated VCTP payload"));
-    }
-    let expected = rsrc::number(payload, 0)?;
-    if expected > MAX_VCTP_SIZE {
-        return Err(invalid(
-            "VCTP consolidated type pool exceeds the size limit",
-        ));
-    }
-    let compressed = &payload[4..];
-    let mut decoder = ZlibDecoder::new(compressed);
-    let mut decoded = Vec::new();
-    decoder
-        .by_ref()
-        .take((MAX_VCTP_SIZE + 1) as u64)
-        .read_to_end(&mut decoded)
-        .map_err(|error| invalid(format!("invalid compressed VCTP data: {error}")))?;
-    if decoded.len() != expected || decoder.total_in() as usize != compressed.len() {
-        return Err(invalid("inconsistent compressed VCTP length"));
-    }
-    Ok(decoded)
-}
-
-/// Reads VCTP's flat Type Descriptor list (returning each entry's start
-/// offset) followed by its top-level index list, without interpreting any
-/// entry other than the one the caller later asks for by `FlatTypeID`.
-pub(super) fn parse_vctp_lists(decoded: &[u8]) -> io::Result<(Vec<usize>, Vec<usize>)> {
-    let mut cursor = 0;
-    let count = rsrc::number(decoded, cursor)?;
-    cursor += 4;
-    if count > MAX_VCTP_TYPE_COUNT {
-        return Err(invalid("VCTP TypeDesc count exceeds the size limit"));
-    }
-    let mut flat_offsets = Vec::new();
-    for _ in 0..count {
-        let entry_start = cursor;
-        flat_offsets.push(entry_start);
-        let (_type, _flags, obj_len) = read_td_header(decoded, &mut cursor)?;
-        cursor = entry_start
-            .checked_add(obj_len)
-            .ok_or_else(|| invalid("VCTP TypeDesc entry length overflow"))?;
-        if cursor > decoded.len() {
-            return Err(invalid("VCTP TypeDesc entry exceeds the section"));
-        }
-    }
-    let top_count = read_variable(decoded, &mut cursor)?;
-    if top_count > MAX_VCTP_TYPE_COUNT {
-        return Err(invalid("VCTP top-level type count exceeds the size limit"));
-    }
-    let mut top_level = Vec::new();
-    for _ in 0..top_count {
-        top_level.push(read_variable(decoded, &mut cursor)?);
-    }
-    Ok((flat_offsets, top_level))
-}
-
-/// Reads a Type Descriptor's `(type, flags, whole-entry length)` header.
-pub(super) fn read_td_header(decoded: &[u8], cursor: &mut usize) -> io::Result<(u8, u8, usize)> {
-    let obj_len = read_variable(decoded, cursor)?;
-    let rest = rsrc::slice(decoded, *cursor, 2)?;
-    let obj_flags = rest[0];
-    let obj_type = rest[1];
-    *cursor += 2;
-    if obj_len < 4 {
-        return Err(invalid("TypeDesc entry is smaller than its own header"));
-    }
-    Ok((obj_type, obj_flags, obj_len))
-}
-
 /// Reads the Function Type Descriptor at `offset` and returns its raw,
 /// undivided 16-bit `pattern` field.
 fn read_function_pattern(decoded: &[u8], offset: usize) -> io::Result<u16> {
@@ -185,20 +95,6 @@ fn read_function_pattern(decoded: &[u8], offset: usize) -> io::Result<u16> {
     }
     let rest = rsrc::slice(decoded, cursor, 4)?;
     Ok(u16::from_be_bytes([rest[2], rest[3]]))
-}
-
-/// Reads LabVIEW's 16-or-32-bit variable-size field: a 16-bit value, or a
-/// 32-bit value when its top bit is set, with that bit cleared from the result.
-pub(super) fn read_variable(decoded: &[u8], cursor: &mut usize) -> io::Result<usize> {
-    let high = rsrc::slice(decoded, *cursor, 2)?;
-    let mut value = u16::from_be_bytes([high[0], high[1]]) as usize;
-    *cursor += 2;
-    if value & 0x8000 != 0 {
-        let low = rsrc::slice(decoded, *cursor, 2)?;
-        *cursor += 2;
-        value = ((value & 0x7fff) << 16) | u16::from_be_bytes([low[0], low[1]]) as usize;
-    }
-    Ok(value)
 }
 
 #[cfg(test)]
